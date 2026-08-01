@@ -406,7 +406,9 @@ export class WitnessStateEngine {
         reason,
       });
     }
-    return [...closures.values()].sort((a, b) => a.lineageId.localeCompare(b.lineageId));
+    return [...closures.values()].sort((a, b) =>
+      a.lineageId < b.lineageId ? -1 : a.lineageId > b.lineageId ? 1 : 0,
+    );
   }
 
   private invalid(

@@ -67,7 +67,7 @@ Never expose Bitcoin RPC to the public internet. Use unique strong RPC and datab
 
 ## Network and indexing boundary
 
-`WITNESS_NETWORK` must be one of `mainnet`, `testnet3`, `signet`, or `regtest`. The encoded protocol bytes are 0, 1, 2, and 3 respectively.
+`WITNESS_NETWORK` must be `signet` or `regtest`. The parser can classify all four assigned protocol network bytes for deterministic observation, but this release fails startup for mainnet and testnet3 deployments.
 
 `INDEXER_START_HEIGHT` is a trust boundary. A deployment starting above zero can verify and continue WITC lineages created after that height, but it cannot discover earlier protocol history without replaying from an earlier boundary. Public canonical deployments should use the protocol activation height once that height is assigned.
 
@@ -100,6 +100,7 @@ Read API base: `/v1/witness`
 - `GET /mempool` and `GET /mempool/:txid`
 - `GET /invalid-events` and `GET /invalid-events/:txid`
 - `GET /search`, `/trending`, `/stats`, and `/fees`
+- `POST /safety/outpoints`
 - `POST /validate`
 
 Bitcoin satoshi amounts are serialized as decimal strings when the database or TypeScript value is wider than safe JSON integers. Consumers must not parse them through floating-point arithmetic.
@@ -115,6 +116,8 @@ Set `MYSQL_READ_HOSTS` to a comma-separated host list to enable TypeORM query re
 The parser verifies the protocol grammar and state rules. Bitcoin Core verifies actual Schnorr signatures, scripts, amounts, and consensus validity for confirmed and mempool transactions. `POST /validate` returns both the WITC evaluation and `testmempoolaccept` policy result. A WITC-valid classification alone is not permission to broadcast or sign.
 
 Optional context manifests are identified only by their SHA-256 hash. `wc_metadata_references` is deliberately untrusted for protocol correctness and the indexer never fetches metadata automatically.
+
+`POST /safety/outpoints` is a no-store signing-safety proof. It brackets Bitcoin Core chain and mempool sequence state, requires exact checkpoint and active-mempool parity, and classifies every requested outpoint at that checkpoint. Wallets must fail closed unless the complete response and all required classifications match the transaction being reviewed.
 
 ## Quality checks
 

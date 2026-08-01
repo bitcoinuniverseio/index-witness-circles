@@ -26,14 +26,30 @@ export class ReorgService {
 
   async reconcileCanonicalChain(handle: IndexerLeaseHandle): Promise<ReorgResult> {
     const checkpoint = await this.store.getCheckpoint();
-    if (!checkpoint?.tipHash || checkpoint.tipHeight < this.store.startHeight) {
+    if (!checkpoint) {
       return { reorged: false };
     }
-    const canonicalAtTip = await this.rpc.getBlockHash(checkpoint.tipHeight);
-    if (canonicalAtTip === checkpoint.tipHash) return { reorged: false };
+    const nodeHeight = await this.rpc.getBlockCount();
+    if (checkpoint.tipHeight < this.store.startHeight) {
+      const boundaryHeight = this.store.startHeight - 1;
+      if (boundaryHeight >= 0) {
+        const boundaryHash =
+          nodeHeight >= boundaryHeight ? await this.rpc.getBlockHash(boundaryHeight) : null;
+        if (checkpoint.tipHash !== boundaryHash || checkpoint.boundaryParentHash !== boundaryHash) {
+          await this.store.setBoundaryParentHash(boundaryHash, handle);
+        }
+      }
+      return { reorged: false };
+    }
+    if (!checkpoint.tipHash) return { reorged: false };
+    if (checkpoint.tipHeight <= nodeHeight) {
+      const canonicalAtTip = await this.rpc.getBlockHash(checkpoint.tipHeight);
+      if (canonicalAtTip === checkpoint.tipHash) return { reorged: false };
+    }
 
     const oldTipHash = checkpoint.tipHash;
-    let forkHeight = checkpoint.tipHeight - 1;
+    let forkHeight = Math.min(checkpoint.tipHeight - 1, nodeHeight);
+    if (checkpoint.tipHeight > nodeHeight) forkHeight = nodeHeight;
     while (forkHeight >= this.store.startHeight) {
       const [localHash, nodeHash] = await Promise.all([
         this.store.getCanonicalBlockHash(forkHeight),
@@ -64,7 +80,10 @@ export class ReorgService {
     try {
       const orphanedBlocks = await this.store.rollbackToHeight(forkHeight, handle);
       if (forkHeight === this.store.startHeight - 1) {
-        const boundary = forkHeight >= 0 ? await this.rpc.getBlockHash(forkHeight) : null;
+        const boundary =
+          forkHeight >= 0 && forkHeight <= nodeHeight
+            ? await this.rpc.getBlockHash(forkHeight)
+            : null;
         await this.store.setBoundaryParentHash(boundary, handle);
       }
       reorg.status = 'replaying';

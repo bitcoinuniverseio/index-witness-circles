@@ -9,8 +9,8 @@ export const WITC_MIN_SHARD_SATS = 1_000n;
 export const WITC_SEQUENCE = 0xffff_fffd;
 export const WITC_MAX_MONEY_SATS = 2_100_000_000_000_000n;
 export const PARSER_VERSION = 'witc-v1.0.0';
-export const INDEXER_VERSION = '0.1.0';
-export const SCHEMA_VERSION = 'witc-indexer-v1';
+export const INDEXER_VERSION = '0.2.0';
+export const SCHEMA_VERSION = 'witc-indexer-v2';
 
 export enum WitnessNetwork {
   MAINNET = 0,

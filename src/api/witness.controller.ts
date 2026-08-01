@@ -1,13 +1,17 @@
 import { Body, Controller, Get, Header, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import {
+  AddressPaginationDto,
   CirclesQueryDto,
   FeesQueryDto,
   GraphQueryDto,
   InvalidEventsQueryDto,
+  LineageHistoryQueryDto,
   LineagesQueryDto,
   MempoolQueryDto,
+  SafetyOutpointsDto,
   SearchQueryDto,
+  TrendingQueryDto,
   ValidateTransactionDto,
 } from './query.dto';
 import { WitnessQueryService } from './witness-query.service';
@@ -60,8 +64,9 @@ export class WitnessController {
   @Header('Cache-Control', PUBLIC_CACHE)
   lineageHistory(
     @Param('lineageId') lineageId: string,
+    @Query() query: LineageHistoryQueryDto,
   ): ReturnType<WitnessQueryService['lineageHistory']> {
-    return this.queries.lineageHistory(lineageId);
+    return this.queries.lineageHistory(lineageId, query);
   }
 
   @Get('shards/:txid/:vout')
@@ -76,14 +81,20 @@ export class WitnessController {
 
   @Get('addresses/:address/holdings')
   @Header('Cache-Control', PUBLIC_CACHE)
-  holdings(@Param('address') address: string): ReturnType<WitnessQueryService['addressHoldings']> {
-    return this.queries.addressHoldings(address);
+  holdings(
+    @Param('address') address: string,
+    @Query() query: AddressPaginationDto,
+  ): ReturnType<WitnessQueryService['addressHoldings']> {
+    return this.queries.addressHoldings(address, query);
   }
 
   @Get('addresses/:address/activity')
   @Header('Cache-Control', PUBLIC_CACHE)
-  activity(@Param('address') address: string): ReturnType<WitnessQueryService['addressActivity']> {
-    return this.queries.addressActivity(address);
+  activity(
+    @Param('address') address: string,
+    @Query() query: AddressPaginationDto,
+  ): ReturnType<WitnessQueryService['addressActivity']> {
+    return this.queries.addressActivity(address, query);
   }
 
   @Get('graph')
@@ -128,8 +139,8 @@ export class WitnessController {
 
   @Get('trending')
   @Header('Cache-Control', PUBLIC_CACHE)
-  trending(): ReturnType<WitnessQueryService['trending']> {
-    return this.queries.trending();
+  trending(@Query() query: TrendingQueryDto): ReturnType<WitnessQueryService['trending']> {
+    return this.queries.trending(query);
   }
 
   @Get('stats')
@@ -149,5 +160,15 @@ export class WitnessController {
   @ApiOperation({ summary: 'Decode and validate a raw transaction without mutating state' })
   validate(@Body() body: ValidateTransactionDto): ReturnType<WitnessQueryService['validate']> {
     return this.queries.validate(body.rawHex);
+  }
+
+  @Post('safety/outpoints')
+  @Header('Cache-Control', 'no-store, max-age=0')
+  @Header('Pragma', 'no-cache')
+  @ApiOperation({ summary: 'Classify exact outpoints against one stable chain and mempool view' })
+  safetyOutpoints(
+    @Body() body: SafetyOutpointsDto,
+  ): ReturnType<WitnessQueryService['safetyOutpoints']> {
+    return this.queries.safetyOutpoints(body.outpoints);
   }
 }

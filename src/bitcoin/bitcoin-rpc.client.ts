@@ -90,6 +90,11 @@ export interface RawMempoolEntry {
   unbroadcast?: boolean;
 }
 
+export interface RawMempoolSequence {
+  txids: string[];
+  mempool_sequence: number;
+}
+
 export interface EstimateSmartFeeResult {
   feerate?: number;
   errors?: string[];
@@ -247,6 +252,10 @@ export class BitcoinRpcClient {
 
   getRawMempool(): Promise<Record<string, RawMempoolEntry>> {
     return this.call<Record<string, RawMempoolEntry>>('getrawmempool', [true]);
+  }
+
+  getRawMempoolSequence(): Promise<RawMempoolSequence> {
+    return this.call<RawMempoolSequence>('getrawmempool', [false, true]);
   }
 
   getMempoolEntry(txid: string): Promise<RawMempoolEntry> {

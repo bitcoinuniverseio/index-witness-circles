@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, In, Not } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import { BitcoinRpcClient, RawMempoolEntry } from '../bitcoin/bitcoin-rpc.client';
 import { AppConfiguration } from '../config/configuration';
 import {
@@ -11,7 +11,9 @@ import {
   MempoolInputEntity,
   MempoolTransactionEntity,
   ReplacementEntity,
+  TransactionEntity,
 } from '../database/entities';
+import { withMasterRead } from '../database/master-read';
 import { BitcoinTransaction, PARSER_VERSION, WitnessStateEngine } from '../protocol';
 import {
   IndexerLeaseHandle,
@@ -25,6 +27,7 @@ export interface MempoolIngestResult {
   protocolStatus: string;
   protocolCode: string | null;
   conflicts: string[];
+  skippedConfirmed?: true;
 }
 
 @Injectable()
@@ -49,6 +52,29 @@ export class MempoolService {
     entry?: RawMempoolEntry,
   ): Promise<MempoolIngestResult> {
     const result = await this.lease.fencedTransaction(handle, 'READ COMMITTED', async (manager) => {
+      const confirmed = await manager.findOneBy(TransactionEntity, {
+        txid: transaction.txid,
+        canonical: true,
+        confirmed: true,
+      });
+      if (confirmed) {
+        const existing = await manager.findOneBy(MempoolTransactionEntity, {
+          txid: transaction.txid,
+        });
+        await manager.update(
+          MempoolTransactionEntity,
+          { txid: transaction.txid },
+          { status: 'confirmed' },
+        );
+        await manager.delete(MempoolInputEntity, { txid: transaction.txid });
+        return {
+          txid: transaction.txid,
+          protocolStatus: existing?.protocolStatus ?? 'none',
+          protocolCode: existing?.protocolCode ?? null,
+          conflicts: [],
+          skippedConfirmed: true as const,
+        };
+      }
       const checkpoint = await manager.findOneBy(CheckpointEntity, { id: 'canonical' });
       if (!checkpoint) throw new Error('Checkpoint is not initialized');
       const evaluation = await this.engine.evaluate(transaction, {
@@ -67,6 +93,8 @@ export class MempoolService {
           rawHex: transaction.hex ?? null,
           protocolStatus,
           protocolCode,
+          evaluatedTipHeight: checkpoint.tipHeight,
+          evaluatedTipHash: checkpoint.tipHash,
           projectionJson: this.projection(evaluation) as never,
           feeSats: entry ? BigInt(Math.round(entry.fees.base * 100_000_000)) : null,
           vsize: entry?.vsize ?? transaction.vsize ?? null,
@@ -104,8 +132,8 @@ export class MempoolService {
           .innerJoin(
             MempoolTransactionEntity,
             'mempool',
-            'mempool.txid = input.txid AND mempool.status = :status',
-            { status: 'active' },
+            'mempool.txid = input.txid AND mempool.status IN (:...statuses)',
+            { statuses: ['active', 'removed'] },
           )
           .where('input.prev_txid = :prevTxid', { prevTxid: input.txid })
           .andWhere('input.prev_vout = :prevVout', { prevVout: input.vout })
@@ -144,7 +172,7 @@ export class MempoolService {
         conflicts: [...conflicts].sort(),
       };
     });
-    this.events.emit('witness.mempool', result);
+    if (!result.skippedConfirmed) this.events.emit('witness.mempool', result);
     return result;
   }
 
@@ -155,26 +183,35 @@ export class MempoolService {
   ): Promise<{ added: number; removed: number; replaced: number }> {
     const mempool = snapshot ?? (await rpc.getRawMempool());
     const nodeTxids = new Set(Object.keys(mempool));
-    const local = await this.dataSource.manager.findBy(MempoolTransactionEntity, {
-      status: In(['active', 'removed']),
-    });
+    const checkpoint = await this.store.getCheckpoint();
+    if (!checkpoint) throw new Error('Checkpoint is not initialized');
+    const local = await withMasterRead(this.dataSource, (manager) =>
+      manager.findBy(MempoolTransactionEntity, {
+        status: In(['active', 'removed']),
+      }),
+    );
     const localByTxid = new Map(local.map((item) => [item.txid, item]));
     let added = 0;
     let removed = 0;
     let replaced = 0;
+    const failures: string[] = [];
 
-    for (const txid of [...nodeTxids].sort()) {
+    for (const txid of this.dependencyOrder(mempool)) {
       const existing = localByTxid.get(txid);
-      if (existing) {
-        if (existing.status !== 'active') await this.setStatus(txid, 'active', handle);
+      if (
+        existing?.status === 'active' &&
+        existing.evaluatedTipHeight === checkpoint.tipHeight &&
+        existing.evaluatedTipHash === checkpoint.tipHash
+      ) {
         continue;
       }
       try {
         const transaction = await rpc.hydratePrevouts(await rpc.getRawTransaction(txid));
         await this.ingest(transaction, handle, mempool[txid]);
-        added += 1;
+        if (!existing) added += 1;
       } catch (error) {
         if (error instanceof IndexerLeaseLostError) throw error;
+        failures.push(txid);
         this.logger.warn({
           event: 'mempool_ingest_failed',
           txid,
@@ -193,6 +230,11 @@ export class MempoolService {
         removed += 1;
       }
     }
+    if (failures.length > 0) {
+      throw new Error(
+        `Mempool reconciliation could not evaluate ${failures.length} transaction(s)`,
+      );
+    }
     await this.purgeExpired(handle);
     return { added, removed, replaced };
   }
@@ -207,66 +249,67 @@ export class MempoolService {
     });
   }
 
-  async confirm(transaction: BitcoinTransaction, handle: IndexerLeaseHandle): Promise<void> {
-    await this.confirmBlock([transaction], handle);
-  }
-
-  async confirmBlock(
-    transactions: BitcoinTransaction[],
-    handle: IndexerLeaseHandle,
-  ): Promise<void> {
-    await this.lease.fencedTransaction(handle, 'READ COMMITTED', async (manager) => {
-      const known = await manager.findBy(MempoolTransactionEntity, {
-        txid: In(transactions.map(({ txid }) => txid)),
-      });
-      const knownIds = new Set(known.map(({ txid }) => txid));
-      for (const transaction of transactions) {
-        if (!knownIds.has(transaction.txid)) continue;
-        await manager.update(
-          MempoolTransactionEntity,
-          { txid: transaction.txid },
-          { status: 'confirmed' },
-        );
-        for (const input of transaction.inputs) {
-          if (!input.txid || input.vout === undefined) continue;
-          const competing = await manager.findBy(MempoolInputEntity, {
-            prevTxid: input.txid,
-            prevVout: input.vout,
-            txid: Not(transaction.txid),
-          });
-          if (competing.length > 0) {
-            await manager.update(
-              MempoolTransactionEntity,
-              { txid: In(competing.map(({ txid }) => txid)) },
-              { status: 'conflicted' },
-            );
-          }
-          await manager
-            .createQueryBuilder()
-            .update(ConflictEntity)
-            .set({ status: 'resolved', winnerTxid: transaction.txid, resolvedAt: new Date() })
-            .where('prev_txid = :txid AND prev_vout = :vout AND status = :status', {
-              txid: input.txid,
-              vout: input.vout,
-              status: 'open',
-            })
-            .execute();
-        }
+  private async findActiveCompetitor(txid: string, nodeTxids: Set<string>): Promise<string | null> {
+    return withMasterRead(this.dataSource, async (manager) => {
+      const conflicts = await manager
+        .createQueryBuilder(ConflictEntity, 'conflict')
+        .where('conflict.status = :status', { status: 'open' })
+        .andWhere('(conflict.first_txid = :txid OR conflict.second_txid = :txid)', { txid })
+        .getMany();
+      for (const conflict of conflicts) {
+        const other = conflict.firstTxid === txid ? conflict.secondTxid : conflict.firstTxid;
+        if (nodeTxids.has(other)) return other;
       }
+      const sharedInputs = (await manager.query(
+        `SELECT DISTINCT candidate.txid
+         FROM wc_mempool_inputs original
+         JOIN wc_mempool_inputs candidate
+           ON candidate.prev_txid = original.prev_txid
+          AND candidate.prev_vout = original.prev_vout
+          AND candidate.txid != original.txid
+         JOIN wc_mempool_transactions mempool
+           ON mempool.txid = candidate.txid AND mempool.status = 'active'
+         WHERE original.txid = ? ORDER BY candidate.txid`,
+        [txid],
+      )) as Array<{ txid: string }>;
+      for (const candidate of sharedInputs) {
+        if (nodeTxids.has(candidate.txid)) return candidate.txid;
+      }
+      return null;
     });
   }
 
-  private async findActiveCompetitor(txid: string, nodeTxids: Set<string>): Promise<string | null> {
-    const conflicts = await this.dataSource.manager
-      .createQueryBuilder(ConflictEntity, 'conflict')
-      .where('conflict.status = :status', { status: 'open' })
-      .andWhere('(conflict.first_txid = :txid OR conflict.second_txid = :txid)', { txid })
-      .getMany();
-    for (const conflict of conflicts) {
-      const other = conflict.firstTxid === txid ? conflict.secondTxid : conflict.firstTxid;
-      if (nodeTxids.has(other)) return other;
+  private dependencyOrder(mempool: Record<string, RawMempoolEntry>): string[] {
+    const txids = Object.keys(mempool).sort();
+    const known = new Set(txids);
+    const indegree = new Map(txids.map((txid) => [txid, 0]));
+    const children = new Map<string, string[]>();
+    for (const txid of txids) {
+      for (const dependency of mempool[txid]?.depends ?? []) {
+        if (!known.has(dependency)) continue;
+        indegree.set(txid, (indegree.get(txid) ?? 0) + 1);
+        const values = children.get(dependency) ?? [];
+        values.push(txid);
+        children.set(dependency, values);
+      }
     }
-    return null;
+    let ready = txids.filter((txid) => indegree.get(txid) === 0);
+    const ordered: string[] = [];
+    while (ready.length > 0) {
+      const batch = ready.sort();
+      ready = [];
+      for (const txid of batch) {
+        ordered.push(txid);
+        for (const child of children.get(txid) ?? []) {
+          const remaining = (indegree.get(child) ?? 0) - 1;
+          indegree.set(child, remaining);
+          if (remaining === 0) ready.push(child);
+        }
+      }
+    }
+    if (ordered.length !== txids.length)
+      throw new Error('Mempool dependency graph contains a cycle');
+    return ordered;
   }
 
   private async recordReplacement(

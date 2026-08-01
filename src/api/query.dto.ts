@@ -1,5 +1,9 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
   IsIn,
   IsInt,
   IsOptional,
@@ -10,6 +14,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -30,6 +35,32 @@ export class CursorPaginationDto {
   @IsString()
   @Matches(CURSOR)
   cursor?: string;
+}
+
+export class LineageHistoryQueryDto {
+  @ApiPropertyOptional({ default: 50, minimum: 1, maximum: 200 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+
+  @ApiPropertyOptional({ maxLength: 256 })
+  @IsOptional()
+  @IsString()
+  @Matches(CURSOR)
+  cursor?: string;
+}
+
+export class AddressPaginationDto extends CursorPaginationDto {
+  @ApiPropertyOptional({ default: 500, minimum: 1, maximum: 500 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  override limit = 500;
 }
 
 export class CirclesQueryDto extends CursorPaginationDto {
@@ -116,6 +147,21 @@ export class InvalidEventsQueryDto extends CursorPaginationDto {
   classification?: string;
 }
 
+export class TrendingQueryDto {
+  @ApiPropertyOptional({ enum: ['24h', '7d', '30d'], default: '24h' })
+  @IsOptional()
+  @IsIn(['24h', '7d', '30d'])
+  window: '24h' | '7d' | '30d' = '24h';
+
+  @ApiPropertyOptional({ default: 100, minimum: 1, maximum: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit = 100;
+}
+
 export class SearchQueryDto extends CursorPaginationDto {
   @ApiProperty({ minLength: 1, maxLength: 128 })
   @IsString()
@@ -149,6 +195,31 @@ export class ValidateTransactionDto {
   @MaxLength(400_000)
   @Matches(/^(?:[0-9a-fA-F]{2})+$/)
   rawHex: string;
+}
+
+export class SafetyOutpointDto {
+  @ApiProperty({ pattern: '^[0-9a-f]{64}$' })
+  @IsString()
+  @Matches(/^[0-9a-f]{64}$/)
+  txid: string;
+
+  @ApiProperty({ minimum: 0, maximum: 0xffff_ffff })
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(0xffff_ffff)
+  vout: number;
+}
+
+export class SafetyOutpointsDto {
+  @ApiProperty({ type: [SafetyOutpointDto], minItems: 1, maxItems: 200 })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ArrayUnique((item: SafetyOutpointDto) => `${item.txid}:${item.vout}`)
+  @ValidateNested({ each: true })
+  @Type(() => SafetyOutpointDto)
+  outpoints: SafetyOutpointDto[];
 }
 
 export class ReindexDto {

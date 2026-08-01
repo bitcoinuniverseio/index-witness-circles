@@ -277,6 +277,10 @@ export class MempoolTransactionEntity {
   protocolStatus: string | null;
   @Column({ name: 'protocol_code', type: 'varchar', length: 64, nullable: true }) protocolCode:
     string | null;
+  @Column({ name: 'evaluated_tip_height', type: 'int', unsigned: true, nullable: true })
+  evaluatedTipHeight: number | null;
+  @Column({ name: 'evaluated_tip_hash', type: 'char', length: 64, nullable: true })
+  evaluatedTipHash: string | null;
   @Column({ name: 'projection_json', type: 'json', nullable: true }) projectionJson: Record<
     string,
     unknown
@@ -351,7 +355,7 @@ export class ReorgEntity {
   @PrimaryGeneratedColumn({ type: 'bigint', unsigned: true }) id: string;
   @Column({ name: 'old_tip_hash', type: 'char', length: 64 }) oldTipHash: string;
   @Column({ name: 'new_tip_hash', type: 'char', length: 64 }) newTipHash: string;
-  @Column({ name: 'fork_height', type: 'int', unsigned: true }) forkHeight: number;
+  @Column({ name: 'fork_height', type: 'int' }) forkHeight: number;
   @Column({ type: 'int', unsigned: true }) depth: number;
   @Column({ type: 'varchar', length: 16 }) status: string;
   @Column({ name: 'orphaned_blocks', type: 'int', unsigned: true, default: 0 })

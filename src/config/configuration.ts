@@ -136,8 +136,8 @@ export function configuration(): AppConfiguration {
   if (!SAFE_LISTEN_HOSTS.has(listenHost)) throw new Error('LISTEN_HOST is not allowed');
   const port = integer('PORT', 3012, 1, 65535);
   const network = (process.env.WITNESS_NETWORK ?? 'regtest') as WitnessNetworkName;
-  if (!['mainnet', 'testnet3', 'signet', 'regtest'].includes(network)) {
-    throw new Error('WITNESS_NETWORK must be mainnet, testnet3, signet, or regtest');
+  if (!['signet', 'regtest'].includes(network)) {
+    throw new Error('WITNESS_NETWORK must be signet or regtest');
   }
   const sourceRevision = process.env.WITNESS_SOURCE_REVISION?.trim() || null;
   if (sourceRevision !== null && !/^[0-9a-fA-F]{40}$/.test(sourceRevision)) {

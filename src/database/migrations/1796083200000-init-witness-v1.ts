@@ -338,7 +338,7 @@ export class InitWitnessV1_1796083200000 implements MigrationInterface {
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       old_tip_hash CHAR(64) NOT NULL,
       new_tip_hash CHAR(64) NOT NULL,
-      fork_height INT UNSIGNED NOT NULL,
+      fork_height INT NOT NULL,
       depth INT UNSIGNED NOT NULL,
       status VARCHAR(16) NOT NULL,
       orphaned_blocks INT UNSIGNED NOT NULL DEFAULT 0,

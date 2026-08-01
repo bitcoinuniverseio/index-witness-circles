@@ -21,6 +21,10 @@ describe('configuration', () => {
   it('rejects invalid networks, origins, booleans, and lease timing', () => {
     process.env.WITNESS_NETWORK = 'testnet4';
     expect(() => configuration()).toThrow('WITNESS_NETWORK');
+    process.env.WITNESS_NETWORK = 'mainnet';
+    expect(() => configuration()).toThrow('WITNESS_NETWORK must be signet or regtest');
+    process.env.WITNESS_NETWORK = 'testnet3';
+    expect(() => configuration()).toThrow('WITNESS_NETWORK must be signet or regtest');
     process.env.WITNESS_NETWORK = 'regtest';
     process.env.PUBLIC_BASE_URL = 'http://user:password@example.test/path';
     expect(() => configuration()).toThrow('PUBLIC_BASE_URL');
@@ -36,7 +40,7 @@ describe('configuration', () => {
     process.env = {
       NODE_ENV: 'production',
       PUBLIC_BASE_URL: 'https://witness.example',
-      WITNESS_NETWORK: 'mainnet',
+      WITNESS_NETWORK: 'signet',
     };
     expect(() => configuration()).toThrow('WITNESS_SOURCE_REVISION');
     process.env.WITNESS_SOURCE_REVISION = 'ab'.repeat(20);
