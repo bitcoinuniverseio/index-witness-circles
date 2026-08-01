@@ -1,8 +1,8 @@
 # Witness Circles Indexer
 
-`index-witness-circles` is the independent Bitcoin Core indexer and public read API for Witness Circles `WITC` v1.
+`index-witness-circles` is the independent Bitcoin Core indexer and public read API for the finalized Witness Circles `WITC` protocol.
 
-It derives all canonical protocol state from Bitcoin blocks. It does not trust manifests, frontends, coordinators, social profiles, or marketplace services. WITC v1 supports only `CIRCLE`. It has no transfer, marketplace, token, mint, or `REFUEL` operation.
+It derives all canonical protocol state from Bitcoin blocks. It does not trust manifests, frontends, coordinators, social profiles, or marketplace services. WITC supports only `CIRCLE`. It has no transfer, marketplace, token, mint, or `REFUEL` operation.
 
 ## What it implements
 

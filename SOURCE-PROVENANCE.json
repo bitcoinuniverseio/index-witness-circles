@@ -4,6 +4,6 @@
   "parserVersion": "witc-v1.0.0",
   "schemaVersion": "witc-indexer-v1",
   "sourceRevisionEnvironment": "WITNESS_SOURCE_REVISION",
-  "canonicalSource": "Bitcoin Core blocks and the WITC v1 specification",
+  "canonicalSource": "Bitcoin Core blocks and the final WITC specification",
   "metadataTrustedForProtocol": false
 }

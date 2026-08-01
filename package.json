@@ -2,7 +2,7 @@
   "name": "@bitcoin-universe/index-witness-circles",
   "version": "0.1.0",
   "private": true,
-  "description": "Deterministic Bitcoin Core indexer and API for Witness Circles WITC v1",
+  "description": "Deterministic Bitcoin Core indexer and API for the finalized Witness Circles WITC protocol",
   "license": "MIT",
   "engines": {
     "node": ">=22 <23"
