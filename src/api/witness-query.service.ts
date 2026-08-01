@@ -88,6 +88,7 @@ export class WitnessQueryService {
 
   async status(): Promise<Record<string, unknown>> {
     const checkpoint = await this.store.getCheckpoint();
+    const runtime = this.syncStatus.snapshot();
     const counts = (await this.dataSource.query(
       `SELECT
         (SELECT COUNT(*) FROM wc_circles WHERE canonical = TRUE) AS circles,
@@ -108,6 +109,16 @@ export class WitnessQueryService {
       nodeError = error instanceof Error ? error.message : String(error);
     }
     const indexedHeight = checkpoint?.tipHeight ?? this.store.startHeight - 1;
+    const indexedHash = checkpoint?.tipHash ?? null;
+    const synced =
+      runtime.initialized &&
+      runtime.ready &&
+      !runtime.syncing &&
+      runtime.lastError === null &&
+      nodeHeight !== null &&
+      nodeHash !== null &&
+      indexedHeight === nodeHeight &&
+      indexedHash === nodeHash;
     const row = counts[0] ?? {};
     return {
       protocol: 'WITC',
@@ -118,15 +129,15 @@ export class WitnessQueryService {
       networkByte: NETWORK_BY_NAME[this.networkName],
       startHeight: this.store.startHeight,
       indexedHeight,
-      indexedHash: checkpoint?.tipHash ?? null,
+      indexedHash,
       nodeHeight,
       nodeHash,
       lag: nodeHeight === null ? null : Math.max(0, nodeHeight - indexedHeight),
-      synced: nodeHeight !== null && indexedHeight >= nodeHeight,
+      synced,
       settledConfirmations: this.settledConfirmations,
       stateRoot: checkpoint?.stateRoot ?? null,
       nodeError,
-      runtime: this.syncStatus.snapshot(),
+      runtime,
       mempool: {
         active: Number(row.mempoolActive ?? 0),
         valid: Number(row.mempoolValid ?? 0),
