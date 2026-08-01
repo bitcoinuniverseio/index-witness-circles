@@ -12,6 +12,12 @@
 
 The application never runs pending migrations automatically.
 
+## Canonical state-root activation
+
+Migration `HardenWitnessState1796083201000` activates the specification-defined state root. Legacy checkpoint and undo roots cannot be converted safely, so the migration deletes only chain-derived projections, resets the checkpoint to the configured boundary, and marks it `reindexing`. It preserves configuration, migration history, parser and indexer version records, leases, metadata references, and admin audit jobs.
+
+This migration requires a complete replay from `INDEXER_START_HEIGHT`. Keep public traffic disabled until replay reaches the exact Core tip, `/ready` succeeds, and both `verify` and `verify-core` pass. The migration is operationally irreversible because deleted projections can only be recovered from a backup or rebuilt from Bitcoin Core.
+
 ## Backups
 
 Back up MySQL with transactionally consistent snapshots and binlogs. Chain-derived state has a logical recovery point of zero because it can be replayed, but restoration time can be substantial. Keep configuration, migration history, parser revision, activation boundary, and Core block data with the backup record.
@@ -34,7 +40,9 @@ Never run two repair or reindex operations concurrently. Read APIs may remain av
 
 ## Reorganizations
 
-The coordinator compares its checkpoint hash to Core before forward sync. On mismatch it finds the common ancestor, records a reorganization, applies each undo document in reverse order, verifies each previous root, then replays the new branch.
+The coordinator compares its checkpoint hash to Core before forward sync. It reads Core's current height first, so a temporarily shorter Core tip rolls local blocks back without requesting unavailable heights. On mismatch it finds the common ancestor, records a reorganization, applies each undo document in reverse order, verifies each previous root, then replays the new branch.
+
+Block projection, checkpoint advancement, and confirmation of matching local mempool rows share one fenced database transaction. A crash therefore cannot commit a confirmed block while leaving the same transaction active in the mempool projection.
 
 If an undo record is absent or a root differs, indexing stops. Do not bypass this check. Restore a verified backup or replay from a known-good boundary.
 

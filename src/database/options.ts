@@ -2,6 +2,7 @@ import { DataSourceOptions } from 'typeorm';
 import { AppConfiguration } from '../config/configuration';
 import { ENTITIES } from './entities';
 import { InitWitnessV1_1796083200000 } from './migrations/1796083200000-init-witness-v1';
+import { HardenWitnessState1796083201000 } from './migrations/1796083201000-harden-witness-state';
 
 export function databaseOptions(config: Pick<AppConfiguration, 'database'>): DataSourceOptions {
   const shared = {
@@ -24,7 +25,7 @@ export function databaseOptions(config: Pick<AppConfiguration, 'database'>): Dat
     charset: 'utf8mb4_bin',
     timezone: 'Z',
     entities: ENTITIES,
-    migrations: [InitWitnessV1_1796083200000],
+    migrations: [InitWitnessV1_1796083200000, HardenWitnessState1796083201000],
     migrationsTableName: 'typeorm_migrations',
     synchronize: false,
     logging: false,

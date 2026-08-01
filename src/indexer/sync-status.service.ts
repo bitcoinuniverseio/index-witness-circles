@@ -10,6 +10,9 @@ export interface SyncStatusSnapshot {
   indexedHeight: number | null;
   lastBlockAt: string | null;
   lastMempoolAt: string | null;
+  mempoolSyncing: boolean;
+  mempoolSequence: number | null;
+  lastMempoolError: string | null;
   lastVerificationAt: string | null;
   lastError: string | null;
 }
@@ -26,6 +29,9 @@ export class SyncStatusService {
     indexedHeight: null,
     lastBlockAt: null,
     lastMempoolAt: null,
+    mempoolSyncing: false,
+    mempoolSequence: null,
+    lastMempoolError: null,
     lastVerificationAt: null,
     lastError: null,
   };

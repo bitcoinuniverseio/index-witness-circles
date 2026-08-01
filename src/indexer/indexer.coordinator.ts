@@ -24,6 +24,22 @@ const CORE_CHAINS: Record<AppConfiguration['network'], string[]> = {
   regtest: ['regtest'],
 };
 
+export function checkpointMatchesCoreTip(
+  checkpoint: {
+    tipHeight: number;
+    tipHash: string | null;
+    boundaryParentHash: string | null;
+  },
+  core: { blocks: number; bestblockhash: string },
+  startHeight: number,
+): boolean {
+  return (
+    checkpoint.tipHeight === core.blocks &&
+    checkpoint.tipHash === core.bestblockhash &&
+    (startHeight === 0 || checkpoint.boundaryParentHash !== null)
+  );
+}
+
 @Injectable()
 export class IndexerCoordinator implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(IndexerCoordinator.name);
@@ -102,7 +118,7 @@ export class IndexerCoordinator implements OnApplicationBootstrap, OnModuleDestr
       await this.lease.assertLeadership(handle);
       this.status.recordVerification();
       this.status.patch({
-        ready: checkpoint.tipHeight >= info.blocks,
+        ready: checkpointMatchesCoreTip(checkpoint, info, this.store.startHeight),
         indexedHeight: checkpoint.tipHeight,
       });
     } catch (error) {
@@ -126,17 +142,55 @@ export class IndexerCoordinator implements OnApplicationBootstrap, OnModuleDestr
     const handle = this.lease.currentLeadership();
     if (!handle) return;
     this.mempoolSyncing = true;
+    this.status.patch({ mempoolSyncing: true, lastMempoolError: null });
     try {
-      const result = await this.mempool.reconcile(this.rpc, handle);
-      this.status.patch({ lastMempoolAt: new Date().toISOString() });
+      const chainBefore = await this.rpc.getBlockchainInfo();
+      const checkpointBefore = await this.store.getCheckpoint();
+      if (
+        !checkpointBefore ||
+        checkpointBefore.tipHeight !== chainBefore.blocks ||
+        checkpointBefore.tipHash !== chainBefore.bestblockhash
+      ) {
+        throw new Error('Canonical checkpoint is not at the Bitcoin Core tip');
+      }
+      const before = await this.rpc.getRawMempoolSequence();
+      const snapshot = await this.rpc.getRawMempool();
+      const beforeTxids = [...before.txids].sort();
+      const snapshotTxids = Object.keys(snapshot).sort();
+      if (JSON.stringify(beforeTxids) !== JSON.stringify(snapshotTxids)) {
+        throw new Error('Bitcoin Core mempool changed before reconciliation');
+      }
+      const result = await this.mempool.reconcile(this.rpc, handle, snapshot);
+      const after = await this.rpc.getRawMempoolSequence();
+      const chainAfter = await this.rpc.getBlockchainInfo();
+      const checkpointAfter = await this.store.getCheckpoint();
+      if (
+        before.mempool_sequence !== after.mempool_sequence ||
+        JSON.stringify(beforeTxids) !== JSON.stringify([...after.txids].sort()) ||
+        !checkpointAfter ||
+        checkpointAfter.tipHeight !== checkpointBefore.tipHeight ||
+        checkpointAfter.tipHash !== checkpointBefore.tipHash ||
+        chainAfter.blocks !== chainBefore.blocks ||
+        chainAfter.bestblockhash !== chainBefore.bestblockhash
+      ) {
+        throw new Error('Bitcoin Core chain or mempool changed during reconciliation');
+      }
+      this.status.patch({
+        lastMempoolAt: new Date().toISOString(),
+        mempoolSequence: after.mempool_sequence,
+        lastMempoolError: null,
+      });
       this.logger.debug({ event: 'mempool_reconciled', ...result });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.status.patch({ lastMempoolError: message });
       this.logger.warn({
         event: 'mempool_sync_failed',
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       });
     } finally {
       this.mempoolSyncing = false;
+      this.status.patch({ mempoolSyncing: false });
     }
   }
 
@@ -181,7 +235,6 @@ export class IndexerCoordinator implements OnApplicationBootstrap, OnModuleDestr
         await this.rpc.getBlock(await this.rpc.getBlockHash(height)),
       );
       const result = await this.store.processBlock(block, handle);
-      await this.mempool.confirmBlock(block.transactions, handle);
       this.status.patch({ indexedHeight: height, lastBlockAt: new Date().toISOString() });
       this.events.emit('witness.block', result);
       for (const circle of result.circles) this.events.emit('witness.circle', circle);
@@ -248,7 +301,20 @@ export class IndexerCoordinator implements OnApplicationBootstrap, OnModuleDestr
   onSequence(notification: SequenceNotification): void {
     if (notification.label === 'R') {
       const handle = this.lease.currentLeadership();
-      if (handle) void this.mempool.markSequenceRemoval(notification.txidOrBlockHash, handle);
+      if (handle) {
+        void this.mempool
+          .markSequenceRemoval(notification.txidOrBlockHash, handle)
+          .catch((error: unknown) => {
+            if (error instanceof IndexerLeaseLostError) return;
+            const message = error instanceof Error ? error.message : String(error);
+            this.status.patch({ lastMempoolError: message });
+            this.logger.warn({
+              event: 'mempool_sequence_removal_failed',
+              txid: notification.txidOrBlockHash,
+              error: message,
+            });
+          });
+      }
     } else if (notification.label === 'C' || notification.label === 'D') {
       void this.syncToTip();
     }

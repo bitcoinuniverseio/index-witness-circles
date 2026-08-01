@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "name": "fresh-continuation-closure-rollback",
+  "genesis": {
+    "source": "golden-circle.json",
+    "expectedStateHash": "07b97f0c2cbaa172e66a2137fefbee64c5a05f03e03967d46936cd14070523f1"
+  },
+  "continuation": {
+    "manifest": {
+      "protocol": "witc",
+      "version": 1,
+      "kind": "circle",
+      "nonce": "11111111111111111111111111111111",
+      "title": "Golden lineage continuation",
+      "created": "2026-08-01T20:00:00Z",
+      "expires": "2026-08-01T21:00:00Z"
+    },
+    "rawTransaction": "02000000000102650f4bc644e84091871a1bcaebe9d34db8a47e6f06240a1a87f2eb32b3d503370100000000fdffffff650f4bc644e84091871a1bcaebe9d34db8a47e6f06240a1a87f2eb32b3d503370200000000fdffffff0300000000000000002a6a285749544301020102656d9e373df39d531f209ea24d8c90ebd7566b0f995444bd2d1b932a0427ab6ee46d00000000000022512079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798f594000000000000225120c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee50140b116ccbb0685599a9b3f44259fc42e7642a7b2afa3dd0e114a76ff233966ae11eb86b73f42aade78e77ab2eebaa026d5b51aa44515ddd74c80da611ad2e559a80140389196614139abf62dadff795eefd55ffa5d48ed41b9cf0554e258109302f837184e39ea8ebe3b1d4c55605763a228d598970aeb7166ca3d6fa54463309533f400000000",
+    "txid": "f7c7ecb3be4ee1925fc97111afde797633de0fae797d0a12383aecb6868328ef",
+    "wtxid": "af2764537d4701d9255777c41fa20aeebd5f1f9884144b8a11b1940a692b7121",
+    "feeSats": "1315",
+    "virtualBytes": 263,
+    "currentBlockHeight": 201,
+    "prevouts": [
+      {
+        "txid": "3703d5b332ebf2871a0a24066f7ea4b84dd3e9ebca1b1a879140e844c64b0f65",
+        "vout": 1,
+        "valueSats": "28790",
+        "scriptPubKey": "512079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "blockHeight": 200
+      },
+      {
+        "txid": "3703d5b332ebf2871a0a24066f7ea4b84dd3e9ebca1b1a879140e844c64b0f65",
+        "vout": 2,
+        "valueSats": "38790",
+        "scriptPubKey": "5120c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+        "blockHeight": 200
+      }
+    ],
+    "blockHeight": 201,
+    "blockHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "transactionIndex": 1,
+    "expectedStateHash": "b29662d78f73f3f8940b2dccaf935dc2a7f1ceba21ef6b1c5b11a7d7f3f5a6fc"
+  },
+  "closure": {
+    "txid": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "spentOutpoints": [
+      {
+        "txid": "f7c7ecb3be4ee1925fc97111afde797633de0fae797d0a12383aecb6868328ef",
+        "vout": 1
+      }
+    ],
+    "blockHeight": 202,
+    "blockHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "transactionIndex": 2,
+    "expectedStateHash": "faf7f730b9b48b39c4509dc3ccb23c94cac6979d334a57fbd1eda20dab7af84c"
+  },
+  "rollbackExpectedStateHashes": [
+    "b29662d78f73f3f8940b2dccaf935dc2a7f1ceba21ef6b1c5b11a7d7f3f5a6fc",
+    "07b97f0c2cbaa172e66a2137fefbee64c5a05f03e03967d46936cd14070523f1",
+    "90e749b7720fac379610d979e29998c7d650150548622f0a47d9d3e181f1be52"
+  ]
+}

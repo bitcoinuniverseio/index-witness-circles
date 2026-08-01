@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager, In } from 'typeorm';
@@ -23,6 +22,7 @@ import {
   TransactionInputEntity,
   TransactionOutputEntity,
 } from '../database/entities';
+import { withMasterRead } from '../database/master-read';
 import {
   BitcoinBlock,
   BitcoinTransaction,
@@ -42,8 +42,8 @@ import {
   scriptHash,
 } from '../protocol';
 import { IndexerLeaseHandle, IndexerLeaseService } from './indexer-lease.service';
-
-const EMPTY_STATE_ROOT = createHash('sha256').update('WITC/state/v1/empty').digest('hex');
+import { confirmMempoolTransactions } from './mempool-confirmation';
+import { computeCanonicalStateRoot, EMPTY_STATE_ROOT } from './state-root';
 
 interface LineageSnapshot {
   lineageId: string;
@@ -231,7 +231,9 @@ export class IndexerStore {
   }
 
   getCheckpoint(): Promise<CheckpointEntity | null> {
-    return this.dataSource.manager.findOneBy(CheckpointEntity, { id: 'canonical' });
+    return withMasterRead(this.dataSource, (manager) =>
+      manager.findOneBy(CheckpointEntity, { id: 'canonical' }),
+    );
   }
 
   async ensureCheckpoint(
@@ -308,6 +310,9 @@ export class IndexerStore {
       const circles: Array<Record<string, unknown>> = [];
       const closures: Array<Record<string, unknown>> = [];
       let invalid = 0;
+      let stateRoot = String(checkpointBefore.stateRoot);
+      let stateRootDirty = false;
+      let statsDirty = false;
       for (let position = 0; position < block.transactions.length; position += 1) {
         const transaction = block.transactions[position]!;
         const result = await this.processTransaction(
@@ -318,17 +323,30 @@ export class IndexerStore {
           position,
           undo,
         );
-        if (result.circle) circles.push(result.circle);
+        if (result.circle) {
+          const stateRootAfter = await this.computeStateRoot(manager);
+          await manager.update(
+            CircleEntity,
+            { circleTxid: transaction.txid, canonical: true },
+            { stateRootAfter },
+          );
+          circles.push({ ...result.circle, stateRootAfter });
+          stateRoot = stateRootAfter;
+          stateRootDirty = false;
+          statsDirty = true;
+        }
         closures.push(...result.closures);
+        if (result.closures.some((closure) => closure['ignored'] !== true)) {
+          stateRootDirty = true;
+          statsDirty = true;
+        }
+        if (result.eventRecorded) statsDirty = true;
         if (result.invalid) invalid += 1;
       }
 
-      const stateRoot = await this.computeStateRoot(manager);
-      await manager.update(
-        CircleEntity,
-        { blockHash: block.hash, canonical: true },
-        { stateRootAfter: stateRoot },
-      );
+      await confirmMempoolTransactions(manager, block.transactions);
+
+      if (stateRootDirty) stateRoot = await this.computeStateRoot(manager);
       checkpoint.tipHeight = block.height;
       checkpoint.tipHash = block.hash;
       checkpoint.stateRoot = stateRoot;
@@ -348,7 +366,7 @@ export class IndexerStore {
         },
         ['blockHash'],
       );
-      await this.recomputeStats(manager);
+      if (statsDirty) await this.recomputeStats(manager);
       return {
         hash: block.hash,
         height: block.height,
@@ -462,15 +480,20 @@ export class IndexerStore {
   }
 
   async verifyState(): Promise<VerifyStateResult> {
-    const checkpoint = await this.getCheckpoint();
-    const actualStateRoot = await this.computeStateRoot(this.dataSource.manager);
-    const rows = (await this.dataSource.query(
-      `SELECT
-        (SELECT COUNT(*) FROM wc_circles WHERE canonical = TRUE) AS circles,
-        (SELECT COUNT(*) FROM wc_lineages) AS lineages,
-        (SELECT COUNT(*) FROM wc_shards WHERE status = 'active') AS activeShards,
-        (SELECT COUNT(*) FROM wc_invalid_events WHERE canonical = TRUE) AS invalidEvents`,
-    )) as Array<Record<string, string | number>>;
+    const { checkpoint, actualStateRoot, rows } = await withMasterRead(
+      this.dataSource,
+      async (manager) => ({
+        checkpoint: await manager.findOneBy(CheckpointEntity, { id: 'canonical' }),
+        actualStateRoot: await this.computeStateRoot(manager),
+        rows: (await manager.query(
+          `SELECT
+            (SELECT COUNT(*) FROM wc_circles WHERE canonical = TRUE) AS circles,
+            (SELECT COUNT(*) FROM wc_lineages) AS lineages,
+            (SELECT COUNT(*) FROM wc_shards WHERE status = 'active') AS activeShards,
+            (SELECT COUNT(*) FROM wc_invalid_events WHERE canonical = TRUE) AS invalidEvents`,
+        )) as Array<Record<string, string | number>>,
+      }),
+    );
     const row = rows[0] ?? {};
     return {
       ok: checkpoint !== null && checkpoint.stateRoot === actualStateRoot,
@@ -515,10 +538,12 @@ export class IndexerStore {
   }
 
   async getCanonicalBlockHash(height: number): Promise<string | null> {
-    const block = await this.dataSource.manager.findOne(BlockEntity, {
-      where: { height, canonical: true },
+    return withMasterRead(this.dataSource, async (manager) => {
+      const block = await manager.findOne(BlockEntity, {
+        where: { height, canonical: true },
+      });
+      return block?.hash ?? null;
     });
-    return block?.hash ?? null;
   }
 
   async createAdminJob(
@@ -561,6 +586,7 @@ export class IndexerStore {
     circle: Record<string, unknown> | null;
     closures: Array<Record<string, unknown>>;
     invalid: boolean;
+    eventRecorded: boolean;
   }> {
     const feeSats = this.transactionFee(transaction);
     await manager.upsert(
@@ -703,7 +729,13 @@ export class IndexerStore {
         appliedClosures.push(await this.applyClosure(manager, lookup, block, closure, undo));
       }
     }
-    return { circle, closures: appliedClosures, invalid };
+    return {
+      circle,
+      closures: appliedClosures,
+      invalid,
+      eventRecorded:
+        evaluation.classification === 'invalid' || evaluation.classification === 'observed',
+    };
   }
 
   private async applyCircle(
@@ -799,8 +831,8 @@ export class IndexerStore {
         status: 'active',
         createdCircleTxid: transaction.txid,
         createdHeight: block.height,
-        previousTxid: oldShard?.txid ?? null,
-        previousVout: oldShard?.vout ?? null,
+        previousTxid: member.input.txid,
+        previousVout: member.input.vout,
         spentByTxid: null,
         spentByVin: null,
         spentHeight: null,
@@ -1021,29 +1053,7 @@ export class IndexerStore {
   }
 
   private async computeStateRoot(manager: EntityManager): Promise<string> {
-    const hash = createHash('sha256').update('WITC/state/v1\n');
-    const queries = [
-      `SELECT circle_txid, participant_count, context_hash, fee_sats, block_height, tx_position
-       FROM wc_circles WHERE canonical = TRUE ORDER BY block_height, tx_position, circle_txid`,
-      `SELECT m.circle_txid, m.slot, m.lineage_id, m.input_txid, m.input_vout,
-              m.input_value_sats, m.output_vout, m.output_value_sats, m.fee_share_sats, m.fresh
-       FROM wc_circle_members m JOIN wc_circles c ON c.circle_txid = m.circle_txid
-       WHERE c.canonical = TRUE ORDER BY m.circle_txid, m.slot`,
-      `SELECT lineage_id, genesis_txid, genesis_vout, current_txid, current_vout,
-              current_value_sats, current_script_hash, status, first_height, last_height,
-              circle_count, last_circle_txid, closed_by_txid
-       FROM wc_lineages ORDER BY lineage_id`,
-      `SELECT txid, vout, lineage_id, value_sats, script_hash, status, created_circle_txid,
-              created_height, previous_txid, previous_vout, spent_by_txid, spent_by_vin, spent_height
-       FROM wc_shards ORDER BY txid, vout`,
-      `SELECT spending_txid, lineage_id, spending_vin, shard_txid, shard_vout, reason, block_height
-       FROM wc_lineage_closures WHERE canonical = TRUE ORDER BY block_height, spending_txid, lineage_id`,
-    ];
-    for (const query of queries) {
-      const rows = (await manager.query(query)) as Array<Record<string, unknown>>;
-      for (const row of rows) hash.update(JSON.stringify(row)).update('\n');
-    }
-    return hash.digest('hex');
+    return computeCanonicalStateRoot(manager);
   }
 
   private async recomputeStats(manager: EntityManager): Promise<void> {

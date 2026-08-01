@@ -173,6 +173,26 @@ describe('WitnessStateEngine', () => {
     });
   });
 
+  it('orders multiple closures by ordinal lineage id regardless of host collation', async () => {
+    const lookup = new MemoryLookup();
+    const low = '11'.repeat(32);
+    const high = 'ff'.repeat(32);
+    lookup.addActiveShard(TXID_A, 0, high, SCRIPT_A, 30_000n);
+    lookup.addActiveShard(TXID_B, 1, low, SCRIPT_B, 40_000n);
+    const transaction = deepCopyTransaction(circleTransaction());
+    transaction.txid = '98'.repeat(32);
+    transaction.outputs = [{ valueSats: 69_000n, scriptPubKeyHex: SCRIPT_A }];
+    const originalLocaleCompare = String.prototype.localeCompare;
+    try {
+      String.prototype.localeCompare = () => -1;
+      const result = await evaluate(transaction, lookup);
+      if (result.classification !== 'none') throw new Error('Expected an ordinary spend');
+      expect(result.closures.map(({ lineageId }) => lineageId)).toEqual([low, high]);
+    } finally {
+      String.prototype.localeCompare = originalLocaleCompare;
+    }
+  });
+
   it('closes active lineages when a marker is invalid', async () => {
     const lookup = new MemoryLookup();
     const lineageId = 'a1'.repeat(32);
