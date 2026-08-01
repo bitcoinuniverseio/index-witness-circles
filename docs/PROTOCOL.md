@@ -1,4 +1,4 @@
-# WITC v1 protocol rules
+# WITC protocol rules
 
 This document states the rules enforced by this indexer. The public protocol repository remains the eventual normative publication location.
 
@@ -20,7 +20,7 @@ OP_RETURN PUSH40
 - Script length: exactly 42 bytes
 - Alternate push encodings and trailing bytes are invalid
 
-Unknown versions are observed but never interpreted by v1. Unknown v1 operations, including `REFUEL`, are invalid.
+Unknown protocol versions are observed but never interpreted by this indexer. Unknown operations, including `REFUEL`, are invalid.
 
 ## Transaction
 
@@ -63,7 +63,7 @@ SHA256(
 
 The outpoint portion is standard Bitcoin wire serialization. A valid Circle creates one same-script successor shard per participant. A later Circle may spend the active shard and create its next successor. A lineage can occur only once in a Circle.
 
-Any confirmed non-v1 spend of an active shard closes the lineage. This includes ordinary transactions, malformed WITC candidates, and unknown future versions as viewed by a v1 indexer. The bitcoin is not burned. The historical lineage remains readable. There is no WITC transfer or rekey operation.
+Any confirmed spend of an active shard that does not satisfy the protocol rules closes the lineage. This includes ordinary transactions, malformed WITC candidates, and unknown future protocol versions. The bitcoin is not burned. The historical lineage remains readable. There is no WITC transfer or rekey operation.
 
 ## Chain and mempool
 

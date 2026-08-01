@@ -1,6 +1,6 @@
 # API contract
 
-API version `v1` is stable within WITC protocol version 1. New optional response fields may be added. Existing fields, meanings, and routes require a new API version before incompatible change.
+The stable API base is `/v1/witness`, serving the final WITC protocol. New optional response fields may be added. Existing fields, meanings, and routes require a new API base before incompatible change.
 
 ## Error taxonomy
 

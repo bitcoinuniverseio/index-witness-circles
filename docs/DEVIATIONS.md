@@ -1,9 +1,9 @@
 # Material implementation decisions
 
-The implementation preserves the selected WITC v1 research design with these explicit resolutions:
+The implementation preserves the selected final WITC protocol design with these explicit resolutions:
 
 1. The previously underspecified lineage outpoint encoding is standard Bitcoin wire serialization: reversed display txid bytes and little-endian uint32 vout, preceded by the exact ASCII domain tag.
-2. `REFUEL` remains reserved and is invalid in v1. No placeholder branch or API exists for it.
+2. `REFUEL` remains reserved and is invalid in the protocol. No placeholder branch or API exists for it.
 3. CPFP is not modeled as a WITC operation. Arbitrary child transactions remain ordinary Bitcoin behavior.
 4. The indexer follows the Core best chain immediately. The configurable confirmation count is a settled-display threshold, not a delay in canonical state.
 5. MySQL 8 is used to match proven Bitcoin Universe indexer infrastructure. MySQL has no partial indexes, so status-first composite indexes and single-writer application invariants replace proposed partial indexes.

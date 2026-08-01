@@ -7,7 +7,7 @@ The indexer never signs, broadcasts, selects coins, or holds keys. It rejects un
 ## Parser safety
 
 - Exact direct push and byte count
-- No alternate operation in v1
+- No alternate operation in the protocol
 - Checked bigint amount arithmetic
 - Deterministic ordering and fee remainder
 - Explicit future-version observation without interpretation

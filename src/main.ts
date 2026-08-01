@@ -43,7 +43,7 @@ async function bootstrap(): Promise<void> {
     new DocumentBuilder()
       .setTitle('Witness Circles Indexer API')
       .setDescription(
-        'Canonical WITC v1 Circles and lineage state derived only from Bitcoin, plus explicitly local mempool observations.',
+        'Canonical WITC Circles and lineage state derived only from Bitcoin, plus explicitly local mempool observations.',
       )
       .setVersion(INDEXER_VERSION)
       .addBearerAuth()
