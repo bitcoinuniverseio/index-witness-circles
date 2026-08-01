@@ -69,7 +69,7 @@ export function parseWitnessScript(scriptHex: string): ParseResult {
     return malformed('UNKNOWN_NETWORK', `Unknown WITC network byte ${networkByte}`, data);
   }
   if (opcodeByte !== WITC_OPCODE_CIRCLE) {
-    return malformed('UNKNOWN_OPCODE', `WITC v1 supports only CIRCLE opcode 1`, data);
+    return malformed('UNKNOWN_OPCODE', `WITC supports only CIRCLE opcode 1`, data);
   }
   if (participantCount < 2 || participantCount > 16) {
     return malformed(

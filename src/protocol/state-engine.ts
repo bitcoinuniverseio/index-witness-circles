@@ -83,7 +83,7 @@ export class WitnessStateEngine {
     if (transaction.version !== 2) {
       return this.invalid(
         'TRANSACTION_VERSION',
-        'WITC v1 requires transaction version 2',
+        'WITC requires transaction version 2',
         invalidClosures,
         envelope.dataHex,
         envelope,
@@ -92,7 +92,7 @@ export class WitnessStateEngine {
     if (transaction.locktime !== 0) {
       return this.invalid(
         'LOCKTIME_MISMATCH',
-        'WITC v1 requires locktime 0',
+        'WITC requires locktime 0',
         invalidClosures,
         envelope.dataHex,
         envelope,
