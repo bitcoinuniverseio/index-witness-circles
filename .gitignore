@@ -10,3 +10,24 @@ generated/
 .vscode/
 *.tsbuildinfo
 mysql-data/
+
+# Local marketing and social-production collateral
+/marketing/
+/social/
+/social-media/
+/campaign/
+/campaigns/
+/promotion/
+/promotions/
+/promotional/
+/promo/
+/drafts/
+/screenshots/
+/videos/
+/social-exports/
+/social_exports/
+/exports/social/
+/exports/x/
+/brand-assets/social/
+/brand-assets/social-media/
+/brand-assets/x/
