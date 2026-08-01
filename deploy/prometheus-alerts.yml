@@ -1,0 +1,37 @@
+groups:
+  - name: witness-indexer
+    rules:
+      - alert: WitnessIndexerNotReady
+        expr: witness_ready == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Witness indexer is not ready
+      - alert: WitnessIndexerLagging
+        expr: witness_node_height - witness_indexed_height > 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Witness indexer is more than three blocks behind Core
+      - alert: WitnessIndexerNoLeader
+        expr: max(witness_ingester_leader) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: No Witness instance holds the canonical writer lease
+      - alert: WitnessIndexerReorganization
+        expr: increase(witness_reorgs_total[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Witness indexer detected a chain reorganization
+      - alert: WitnessApiServerErrors
+        expr: sum(rate(witness_http_requests_total{status=~"5.."}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Witness API has sustained server errors

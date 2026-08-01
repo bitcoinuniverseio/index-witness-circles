@@ -1,0 +1,9 @@
+{
+  "protocol": "WITC",
+  "protocolVersion": 1,
+  "parserVersion": "witc-v1.0.0",
+  "schemaVersion": "witc-indexer-v1",
+  "sourceRevisionEnvironment": "WITNESS_SOURCE_REVISION",
+  "canonicalSource": "Bitcoin Core blocks and the WITC v1 specification",
+  "metadataTrustedForProtocol": false
+}
