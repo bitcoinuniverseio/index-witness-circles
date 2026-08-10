@@ -24,7 +24,7 @@ It derives all canonical protocol state from Bitcoin blocks. It does not trust m
 
 Requirements:
 
-- Node.js 24.18.1 and npm 11.16.0
+- Node.js 24.19.0 and npm 11.17.0
 - MySQL 8.0 or newer
 - Bitcoin Core with RPC and ZMQ enabled
 - `txindex=1` for reliable historical prevout hydration
