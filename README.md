@@ -39,6 +39,10 @@ npm run start:dev
 
 The default HTTP port is `3012`.
 
+Repository CI uses PowerShell and the shared `universe-ci` capability, so the
+same format, lint, type, test, build, and dependency gates can run on certified
+Linux or Windows workers. Fork pull requests cannot execute on private runners.
+
 - API: `http://127.0.0.1:3012/v1/witness/status`
 - OpenAPI UI: `http://127.0.0.1:3012/docs`
 - OpenAPI JSON: `http://127.0.0.1:3012/docs-json`
