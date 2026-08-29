@@ -2,7 +2,7 @@
 
 `index-witness-circles` is the independent Bitcoin Core indexer and public read API for the finalized Witness Circles `WITC` protocol.
 
-It derives all canonical protocol state from Bitcoin blocks. It does not trust manifests, frontends, coordinators, social profiles, or marketplace services. WITC supports only `CIRCLE`. It has no transfer, marketplace, token, mint, or `REFUEL` operation.
+It derives all authoritative protocol state from Bitcoin blocks. It does not trust manifests, frontends, coordinators, social profiles, or marketplace services. WITC supports only `CIRCLE`. It has no transfer, marketplace, token, mint, or `REFUEL` operation.
 
 ## What it implements
 
@@ -73,9 +73,9 @@ Never expose Bitcoin RPC to the public internet. Use unique strong RPC and datab
 
 `WITNESS_NETWORK` must be `signet` or `regtest`. The parser can classify all four assigned protocol network bytes for deterministic observation, but this release fails startup for mainnet and testnet3 deployments.
 
-`INDEXER_START_HEIGHT` is a trust boundary. A deployment starting above zero can verify and continue WITC lineages created after that height, but it cannot discover earlier protocol history without replaying from an earlier boundary. Public canonical deployments should use the protocol activation height once that height is assigned.
+`INDEXER_START_HEIGHT` is a trust boundary. A deployment starting above zero can verify and continue WITC lineages created after that height, but it cannot discover earlier protocol history without replaying from an earlier boundary. Public authoritative deployments should use the protocol activation height once that height is assigned.
 
-The indexer follows the node's best chain at one confirmation. `INDEXER_CONFIRMATIONS` is the display threshold for a settled Circle and does not delay canonical indexing.
+The indexer follows the node's best chain at one confirmation. `INDEXER_CONFIRMATIONS` is the display threshold for a settled Circle and does not delay authoritative indexing.
 
 ## Commands
 
@@ -88,7 +88,7 @@ npm run cli -- reindex 0
 npm run cli -- reindex-range 1000 2000
 ```
 
-The same commands are available under `/v1/witness/admin` and require a bearer token from `ADMIN_API_KEYS`. Range replay rolls back to the preceding height, replays the requested range, then restores canonical state through the current Core tip.
+The same commands are available under `/v1/witness/admin` and require a bearer token from `ADMIN_API_KEYS`. Range replay rolls back to the preceding height, replays the requested range, then restores authoritative state through the current Core tip.
 
 ## Stable REST paths
 
@@ -111,9 +111,9 @@ Bitcoin satoshi amounts are serialized as decimal strings when the database or T
 
 ## Horizontal operation
 
-Multiple instances may share one primary database. Exactly one instance holds the canonical-ingester lease. The fencing token is checked inside every state-changing database transaction. Standby instances continue serving reads and attempt leadership after lease expiry.
+Multiple instances may share one primary database. Exactly one instance holds the authoritative-ingester lease. The fencing token is checked inside every state-changing database transaction. Standby instances continue serving reads and attempt leadership after lease expiry.
 
-Set `MYSQL_READ_HOSTS` to a comma-separated host list to enable TypeORM query replicas. Canonical ingestion, migrations, lease changes, checkpoints, and repair work always target the primary. Read replicas may be briefly stale and must never drive validation or signing decisions.
+Set `MYSQL_READ_HOSTS` to a comma-separated host list to enable TypeORM query replicas. Authoritative ingestion, migrations, lease changes, checkpoints, and repair work always target the primary. Read replicas may be briefly stale and must never drive validation or signing decisions.
 
 ## Validation boundary
 
