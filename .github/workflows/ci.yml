@@ -13,11 +13,18 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  route:
+    uses: bitcoinuniverseio/.github-private/.github/workflows/route.yml@develop
+    secrets: inherit
+    with:
+      plan: '{"verify_2":"light"}'
+
   verify:
+    needs: route
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, universe-ci]
+    runs-on: ${{ fromJSON(needs.route.outputs.targets).verify_2 }}
     defaults:
       run:
         shell: pwsh
