@@ -13,18 +13,15 @@ concurrency:
 permissions:
   contents: read
 jobs:
-  route:
-    uses: bitcoinuniverseio/.github-private/.github/workflows/route.yml@develop
-    secrets: inherit
-    with:
-      plan: '{"verify_2":"light"}'
-
   verify:
-    needs: route
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ${{ fromJSON(needs.route.outputs.targets).verify_2 }}
+    # This repository is public and the capacity router is a reusable workflow
+    # in the private .github-private, which a public caller cannot resolve.
+    # Target the ultra pool directly until the router is published somewhere a
+    # public repository can reach.
+    runs-on: [self-hosted, linux-ultra]
     defaults:
       run:
         shell: pwsh
