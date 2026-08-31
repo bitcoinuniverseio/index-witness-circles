@@ -86,12 +86,12 @@ jobs:
           persist-credentials: false
       - uses: bitcoinuniverseio/universe-ci-actions/universe-node-env@main
       - run: npm run build
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      # Kept on the fleet's own NVMe rather than metered artifact storage, so
+      # deployment and any later scan consume these exact bytes for free.
+      - uses: bitcoinuniverseio/universe-ci-actions/universe-build-store@main
         with:
-          name: index-witness-circles-dist-${{ github.sha }}
           path: dist
-          retention-days: 3
-          compression-level: 1
+          mode: save
 
   ci:
     name: ci
