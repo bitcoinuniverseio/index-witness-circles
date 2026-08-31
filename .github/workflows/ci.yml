@@ -29,7 +29,7 @@ jobs:
         with:
           persist-credentials: false
       - id: env
-        uses: bitcoinuniverseio/.github-private/.github/actions/universe-node-env@develop
+        uses: bitcoinuniverseio/universe-ci-actions/universe-node-env@main
 
   format:
     needs: prepare
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: bitcoinuniverseio/.github-private/.github/actions/universe-node-env@develop
+      - uses: bitcoinuniverseio/universe-ci-actions/universe-node-env@main
       - run: npm run format:check
       - run: npm audit --omit=dev --audit-level=high
 
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: bitcoinuniverseio/.github-private/.github/actions/universe-node-env@develop
+      - uses: bitcoinuniverseio/universe-ci-actions/universe-node-env@main
       - run: npm run lint
 
   typecheck:
@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: bitcoinuniverseio/.github-private/.github/actions/universe-node-env@develop
+      - uses: bitcoinuniverseio/universe-ci-actions/universe-node-env@main
       - run: npm run typecheck
 
   test:
@@ -73,7 +73,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: bitcoinuniverseio/.github-private/.github/actions/universe-node-env@develop
+      - uses: bitcoinuniverseio/universe-ci-actions/universe-node-env@main
       - run: npm test
 
   build:
@@ -84,7 +84,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: bitcoinuniverseio/.github-private/.github/actions/universe-node-env@develop
+      - uses: bitcoinuniverseio/universe-ci-actions/universe-node-env@main
       - run: npm run build
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
