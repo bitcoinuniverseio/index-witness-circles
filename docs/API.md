@@ -8,7 +8,7 @@ The stable API base is `/v1/witness`, serving the final WITC protocol. New optio
 - `401`: missing or invalid admin bearer token
 - `404`: indexed object does not exist
 - `429`: HTTP or WebSocket rate limit
-- `503`: database or canonical indexer is not ready
+- `503`: database or authoritative indexer is not ready
 
 Protocol validation responses use the explicit parser or evaluation codes from `src/protocol/types.ts`.
 
@@ -18,13 +18,13 @@ Collection routes accept `limit`, normally 1 through 200, and an opaque `cursor`
 
 ## Core routes
 
-`GET /v1/witness/status` returns network, versions, Core and checkpoint heights, lag, state root, mempool counts, and canonical object counts.
+`GET /v1/witness/status` returns network, versions, Core and checkpoint heights, lag, state root, mempool counts, and authoritative object counts.
 
 `GET /v1/witness/circles` filters by confirmation state, participant count, context hash, and order. `GET /circles/:txid` returns Circle, members, lineage edges, Bitcoin transaction summary, and live confirmation count.
 
-`GET /v1/witness/transactions/:txid` includes every lineage closure attributed to that transaction, retaining the `canonical` flag for orphan inspection. Address activity combines canonical Circle participation and ordinary closure events in one deterministic cursor order, so a shard cannot disappear from holdings without a corresponding activity record.
+`GET /v1/witness/transactions/:txid` includes every lineage closure attributed to that transaction, retaining the `canonical` flag for orphan inspection. Address activity combines authoritative Circle participation and ordinary closure events in one deterministic cursor order, so a shard cannot disappear from holdings without a corresponding activity record.
 
-`GET /v1/witness/lineages` filters by status or current script hash. Detail includes the current shard and complete legacy history. The history route preserves its complete response when called without query parameters; supplying `limit` or `cursor` opts into bounded pages of canonical Circle rows, matching shard rows, and the canonical closure. An ordinary closure is shown as a closure, never as a transfer.
+`GET /v1/witness/lineages` filters by status or current script hash. Detail includes the current shard and complete legacy history. The history route preserves its complete response when called without query parameters; supplying `limit` or `cursor` opts into bounded pages of authoritative Circle rows, matching shard rows, and the authoritative closure. An ordinary closure is shown as a closure, never as a transfer.
 
 `GET /v1/witness/graph` accepts an anchor Circle or lineage and enforces depth and 1,000-node bounds.
 
