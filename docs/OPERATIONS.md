@@ -12,7 +12,7 @@
 
 The application never runs pending migrations automatically.
 
-## Canonical state-root activation
+## Authoritative state-root activation
 
 Migration `HardenWitnessState1796083201000` activates the specification-defined state root. Legacy checkpoint and undo roots cannot be converted safely, so the migration deletes only chain-derived projections, resets the checkpoint to the configured boundary, and marks it `reindexing`. It preserves configuration, migration history, parser and indexer version records, leases, metadata references, and admin audit jobs.
 
@@ -32,7 +32,7 @@ Test a restore at least monthly:
 
 ## Reindexing
 
-`repair` rebuilds only noncanonical search and statistics. It cannot repair protocol state.
+`repair` rebuilds only nonauthoritative search and statistics. It cannot repair protocol state.
 
 `reindex H` rolls back through H-1 and replays to Core tip. `reindex-range A B` proves the selected range can be replayed, then continues to Core tip. Both require the writer lease and create an auditable admin job row.
 
@@ -56,4 +56,4 @@ Nest shutdown hooks close ZMQ sockets and release the lease. Container orchestra
 
 ## Retention
 
-Canonical Bitcoin and WITC facts, invalid confirmed markers, undo records, reorgs, checkpoints, and admin audit jobs are retained. Terminal mempool observations are removed after `MEMPOOL_RETENTION_DAYS`. Backups and logs need an organization-approved retention policy before production.
+Authoritative Bitcoin and WITC facts, invalid confirmed markers, undo records, reorgs, checkpoints, and admin audit jobs are retained. Terminal mempool observations are removed after `MEMPOOL_RETENTION_DAYS`. Backups and logs need an organization-approved retention policy before production.
