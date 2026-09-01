@@ -11,21 +11,12 @@
   "chains": [
     {
       "chain": "bitcoin",
-      "networks": [
-        "mainnet"
-      ]
+      "networks": ["mainnet"]
     }
   ],
-  "protocols": [
-    "witness-circles"
-  ],
-  "audiences": [
-    "indexer-operator",
-    "app-developer"
-  ],
-  "owners": [
-    "bitcoinuniverseio"
-  ],
+  "protocols": ["witness-circles"],
+  "audiences": ["indexer-operator", "app-developer"],
+  "owners": ["bitcoinuniverseio"],
   "lastVerified": {
     "commit": "508861a572b989b82db2aa0cc46f36315a36630e",
     "timestamp": "2026-09-01T02:00:00Z"
