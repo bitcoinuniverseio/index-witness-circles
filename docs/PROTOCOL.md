@@ -67,6 +67,6 @@ Any confirmed spend of an active shard that does not satisfy the protocol rules 
 
 ## Chain and mempool
 
-The best Bitcoin chain defines canonical state. Pending observations are local to one node and never mutate canonical lineages. Replacement requires a new transaction and signatures. On a reorganization, the indexer restores the exact pre-block snapshots and verifies the previous state root before replay.
+The best Bitcoin chain defines authoritative state. Pending observations are local to one node and never mutate authoritative lineages. Replacement requires a new transaction and signatures. On a reorganization, the indexer restores the exact pre-block snapshots and verifies the previous state root before replay.
 
 Context metadata is optional and cannot affect parsing, validity, ownership, ordering, fees, or state.

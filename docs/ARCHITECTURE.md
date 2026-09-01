@@ -22,9 +22,9 @@ REST, Socket.IO, OpenAPI, metrics, health, and admin tools
 
 ## Trust boundaries
 
-Bitcoin Core is the consensus and policy verifier. MySQL is a reproducible projection. The parser is deterministic and does not make network requests. Optional metadata is untrusted. Public API input can select or validate data but cannot mutate canonical state.
+Bitcoin Core is the consensus and policy verifier. MySQL is a reproducible projection. The parser is deterministic and does not make network requests. Optional metadata is untrusted. Public API input can select or validate data but cannot mutate authoritative state.
 
-The canonical writer lease uses a database row, expiry, monotonically increasing fencing token, and `FOR UPDATE` check inside each state mutation. This prevents a paused former leader from committing after a replacement leader acquires the lease.
+The authoritative writer lease uses a database row, expiry, monotonically increasing fencing token, and `FOR UPDATE` check inside each state mutation. This prevents a paused former leader from committing after a replacement leader acquires the lease.
 
 ## Atomicity and recovery
 
@@ -34,10 +34,10 @@ The undo document stores each preexisting lineage, shard, and output row before 
 
 ## Determinism
 
-The state root hashes ordered canonical Circle facts, member facts, current lineage state, all shard state, and canonical closures. The hash excludes API cache, manifests, profiles, timestamps created by the database, mempool data, search text, and statistics.
+The state root hashes ordered authoritative Circle facts, member facts, current lineage state, all shard state, and authoritative closures. The hash excludes API cache, manifests, profiles, timestamps created by the database, mempool data, search text, and statistics.
 
-`verify` recomputes the root. `verify-core` compares canonical block hashes to Core. Range replay restores the tail after repairing the requested range, so partial repair cannot leave the database at an arbitrary historical state.
+`verify` recomputes the root. `verify-core` compares authoritative block hashes to Core. Range replay restores the tail after repairing the requested range, so partial repair cannot leave the database at an arbitrary historical state.
 
 ## Scaling
 
-The canonical writer is intentionally single-leader because block order is serial. API instances and optional read replicas scale horizontally. Block writes use normalized rows and composite indexes. Graph queries have explicit depth and node limits. REST collections use cursors. Mempool terminal records have configurable retention.
+The authoritative writer is intentionally single-leader because block order is serial. API instances and optional read replicas scale horizontally. Block writes use normalized rows and composite indexes. Graph queries have explicit depth and node limits. REST collections use cursors. Mempool terminal records have configurable retention.
