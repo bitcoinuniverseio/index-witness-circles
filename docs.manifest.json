@@ -4,7 +4,7 @@
   "name": "Witness Circles indexer",
   "classification": "indexer",
   "repository": "bitcoinuniverseio/index-witness-circles",
-  "documentationUrl": "https://docs.bitcoinuniverse.io/infrastructure/index-witness-circles/",
+  "documentationUrl": "https://docs.bitcoinuniverse.io/developers/interfaces/",
   "docsRoot": "docs",
   "sourceRef": "main",
   "lifecycle": "experimental",
