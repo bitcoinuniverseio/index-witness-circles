@@ -21,10 +21,10 @@ describe('configuration', () => {
   it('rejects invalid networks, origins, booleans, and lease timing', () => {
     process.env.WITNESS_NETWORK = 'testnet4';
     expect(() => configuration()).toThrow('WITNESS_NETWORK');
-    process.env.WITNESS_NETWORK = 'mainnet';
-    expect(() => configuration()).toThrow('WITNESS_NETWORK must be signet or regtest');
     process.env.WITNESS_NETWORK = 'testnet3';
-    expect(() => configuration()).toThrow('WITNESS_NETWORK must be signet or regtest');
+    expect(() => configuration()).toThrow('WITNESS_NETWORK must be mainnet, signet, or regtest');
+    process.env.WITNESS_NETWORK = 'mainnet';
+    expect(configuration().network).toBe('mainnet');
     process.env.WITNESS_NETWORK = 'regtest';
     process.env.PUBLIC_BASE_URL = 'http://user:password@example.test/path';
     expect(() => configuration()).toThrow('PUBLIC_BASE_URL');
