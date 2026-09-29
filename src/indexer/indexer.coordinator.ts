@@ -153,31 +153,34 @@ export class IndexerCoordinator implements OnApplicationBootstrap, OnModuleDestr
       ) {
         throw new Error('Canonical checkpoint is not at the Bitcoin Core tip');
       }
+      // The reconciliation is complete as of one atomic (txids, sequence)
+      // snapshot. Requiring the mempool to stay unchanged across the whole
+      // pass made it unreachable on mainnet, where the mempool changes every
+      // second; transactions that arrive during the pass are covered by the
+      // next poll, and the reported sequence is the one actually covered.
       const before = await this.rpc.getRawMempoolSequence();
-      const snapshot = await this.rpc.getRawMempool();
-      const beforeTxids = [...before.txids].sort();
-      const snapshotTxids = Object.keys(snapshot).sort();
-      if (JSON.stringify(beforeTxids) !== JSON.stringify(snapshotTxids)) {
-        throw new Error('Bitcoin Core mempool changed before reconciliation');
+      const entries = await this.rpc.getRawMempool();
+      const snapshot: typeof entries = {};
+      for (const txid of before.txids) {
+        // A transaction missing from the second call left the mempool in
+        // between, so the node no longer holds it.
+        if (entries[txid]) snapshot[txid] = entries[txid];
       }
       const result = await this.mempool.reconcile(this.rpc, handle, snapshot);
-      const after = await this.rpc.getRawMempoolSequence();
       const chainAfter = await this.rpc.getBlockchainInfo();
       const checkpointAfter = await this.store.getCheckpoint();
       if (
-        before.mempool_sequence !== after.mempool_sequence ||
-        JSON.stringify(beforeTxids) !== JSON.stringify([...after.txids].sort()) ||
         !checkpointAfter ||
         checkpointAfter.tipHeight !== checkpointBefore.tipHeight ||
         checkpointAfter.tipHash !== checkpointBefore.tipHash ||
         chainAfter.blocks !== chainBefore.blocks ||
         chainAfter.bestblockhash !== chainBefore.bestblockhash
       ) {
-        throw new Error('Bitcoin Core chain or mempool changed during reconciliation');
+        throw new Error('Bitcoin Core chain changed during reconciliation');
       }
       this.status.patch({
         lastMempoolAt: new Date().toISOString(),
-        mempoolSequence: after.mempool_sequence,
+        mempoolSequence: before.mempool_sequence,
         lastMempoolError: null,
       });
       this.logger.debug({ event: 'mempool_reconciled', ...result });

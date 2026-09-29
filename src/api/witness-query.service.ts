@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, In } from 'typeorm';
-import { BitcoinRpcClient } from '../bitcoin/bitcoin-rpc.client';
+import { BitcoinRpcClient, BitcoinRpcError } from '../bitcoin/bitcoin-rpc.client';
 import { decodeRawTransaction } from '../bitcoin/raw-transaction';
 import { AppConfiguration } from '../config/configuration';
 import {
@@ -70,7 +70,6 @@ const CORE_CHAIN_BY_NETWORK: Record<AppConfiguration['network'], string> = {
   signet: 'signet',
   regtest: 'regtest',
 };
-const MAX_SAFETY_MEMPOOL_TRANSACTIONS = 100_000;
 
 function encodeCursor(value: Record<string, unknown>): string {
   return Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -1067,8 +1066,13 @@ export class WitnessQueryService {
       this.assertSafetyRuntime(runtimeBefore);
       const infoBefore = await this.rpc.getBlockchainInfo();
       this.assertSafetyCore(infoBefore);
-      const mempoolBefore = await this.rpc.getRawMempoolSequence();
-      const coreTxids = this.normalizedMempoolSnapshot(mempoolBefore);
+      // Mainnet's mempool changes every second, so a whole-mempool equality
+      // between Core and the local projection can never hold. Safety only
+      // needs the mempool facts about the requested outpoints: whether their
+      // creating transaction is unconfirmed and which transaction spends
+      // them. Core answers both exactly; the local projection must cover
+      // every such transaction at the current tip, or this fails closed.
+      const nodeBefore = await this.outpointMempoolFacts(outpoints);
       const tupleSql = outpoints.map(() => '(?, ?)').join(', ');
       const tupleParameters = outpoints.flatMap(({ txid, vout }) => [txid, vout]);
       const txidSql = outpoints.map(() => '?').join(', ');
@@ -1076,11 +1080,16 @@ export class WitnessQueryService {
       const database = await this.dataSource.transaction('REPEATABLE READ', async (manager) => {
         const checkpoint = await manager.findOneBy(CheckpointEntity, { id: 'canonical' });
         if (!checkpoint) throw new Error('Canonical checkpoint is unavailable');
+        const relevant = [...nodeBefore.relevant];
         const [activeMempool, activeShards, pendingOutputs, pendingSpends] = (await Promise.all([
-          manager.query(
-            `SELECT txid, evaluated_tip_hash AS evaluatedTipHash
-             FROM wc_mempool_transactions WHERE status = 'active' ORDER BY txid`,
-          ),
+          relevant.length === 0
+            ? Promise.resolve([])
+            : manager.query(
+                `SELECT txid, evaluated_tip_hash AS evaluatedTipHash
+                 FROM wc_mempool_transactions
+                 WHERE status = 'active' AND txid IN (${relevant.map(() => '?').join(', ')})`,
+                relevant,
+              ),
           manager.query(
             `SELECT txid, vout, lineage_id AS lineageId, created_circle_txid AS circleTxid
              FROM wc_shards WHERE status = 'active' AND (txid, vout) IN (${tupleSql})`,
@@ -1110,8 +1119,7 @@ export class WitnessQueryService {
         };
       });
 
-      const mempoolAfter = await this.rpc.getRawMempoolSequence();
-      const afterTxids = this.normalizedMempoolSnapshot(mempoolAfter);
+      const nodeAfter = await this.outpointMempoolFacts(outpoints);
       const infoAfter = await this.rpc.getBlockchainInfo();
       this.assertSafetyCore(infoAfter);
       const runtimeAfter = this.syncStatus.snapshot();
@@ -1122,22 +1130,18 @@ export class WitnessQueryService {
         infoBefore.bestblockhash !== infoAfter.bestblockhash ||
         database.checkpoint.tipHeight !== infoBefore.blocks ||
         database.checkpoint.tipHash !== infoBefore.bestblockhash ||
-        mempoolBefore.mempool_sequence !== mempoolAfter.mempool_sequence ||
-        runtimeBefore.mempoolSequence !== mempoolBefore.mempool_sequence ||
-        runtimeAfter.mempoolSequence !== mempoolAfter.mempool_sequence ||
-        JSON.stringify(coreTxids) !== JSON.stringify(afterTxids)
+        nodeBefore.fingerprint !== nodeAfter.fingerprint
       ) {
         throw new Error('Chain or mempool changed during the safety snapshot');
       }
 
-      const localTxids = database.activeMempool.map((row) => String(row.txid)).sort();
-      if (JSON.stringify(localTxids) !== JSON.stringify(coreTxids)) {
-        throw new Error('Mempool projection is incomplete');
-      }
-      if (
-        database.activeMempool.some((row) => row.evaluatedTipHash !== database.checkpoint.tipHash)
-      ) {
-        throw new Error('Mempool projection was evaluated against a different chain tip');
+      const projected = new Map(
+        database.activeMempool.map((row) => [String(row.txid), row.evaluatedTipHash]),
+      );
+      for (const txid of nodeBefore.relevant) {
+        if (projected.get(txid) !== database.checkpoint.tipHash) {
+          throw new Error('Mempool projection does not yet cover a requested outpoint');
+        }
       }
 
       const shards = new Map(
@@ -1171,13 +1175,18 @@ export class WitnessQueryService {
         pendingByTxid.set(String(row.txid), { participantCount, lineages });
       }
       const spenders = new Map<string, string[]>();
-      for (const row of database.pendingSpends) {
-        const key = `${String(row.txid)}:${Number(row.vout)}`;
+      const addSpender = (key: string, spendingTxid: string): void => {
         const values = spenders.get(key) ?? [];
-        values.push(String(row.spendingTxid));
+        if (!values.includes(spendingTxid)) values.push(spendingTxid);
         spenders.set(key, values);
+      };
+      for (const [key, spendingTxid] of nodeBefore.spenders) addSpender(key, spendingTxid);
+      for (const row of database.pendingSpends) {
+        // A locally projected spender Core no longer holds is stale.
+        if (!nodeBefore.unconfirmed.has(String(row.spendingTxid))) continue;
+        addSpender(`${String(row.txid)}:${Number(row.vout)}`, String(row.spendingTxid));
       }
-      const coreSet = new Set(coreTxids);
+      const coreSet = nodeBefore.unconfirmed;
 
       const items = outpoints.map(({ txid, vout }) => {
         const key = `${txid}:${vout}`;
@@ -1224,7 +1233,7 @@ export class WitnessQueryService {
           nodeHeight: infoAfter.blocks,
           nodeHash: infoAfter.bestblockhash,
           stateRoot: database.checkpoint.stateRoot,
-          coreMempoolSequence: mempoolAfter.mempool_sequence,
+          coreMempoolSequence: runtimeAfter.mempoolSequence,
           mempoolReconciledAt: runtimeAfter.lastMempoolAt,
         },
         items,
@@ -1278,7 +1287,6 @@ export class WitnessQueryService {
       !runtime.ready ||
       !runtime.leader ||
       runtime.syncing ||
-      runtime.mempoolSyncing ||
       runtime.lastError !== null ||
       runtime.lastMempoolError !== null ||
       runtime.mempoolSequence === null ||
@@ -1301,23 +1309,56 @@ export class WitnessQueryService {
     }
   }
 
-  private normalizedMempoolSnapshot(
-    snapshot: Awaited<ReturnType<BitcoinRpcClient['getRawMempoolSequence']>>,
-  ): string[] {
-    if (
-      !Number.isSafeInteger(snapshot.mempool_sequence) ||
-      snapshot.mempool_sequence < 0 ||
-      !Array.isArray(snapshot.txids) ||
-      snapshot.txids.length > MAX_SAFETY_MEMPOOL_TRANSACTIONS ||
-      snapshot.txids.some((txid) => !/^[0-9a-f]{64}$/.test(txid))
-    ) {
-      throw new ServiceUnavailableException('Bitcoin Core returned an invalid mempool snapshot');
+  /**
+   * Core's view of the requested outpoints: which of their creating
+   * transactions are unconfirmed, and which mempool transaction spends each.
+   * `relevant` lists every such transaction the local projection must cover.
+   */
+  private async outpointMempoolFacts(
+    outpoints: ReadonlyArray<{ txid: string; vout: number }>,
+  ): Promise<{
+    unconfirmed: Set<string>;
+    spenders: Map<string, string>;
+    relevant: Set<string>;
+    fingerprint: string;
+  }> {
+    const txids = [...new Set(outpoints.map(({ txid }) => txid))];
+    const membership = await Promise.all(
+      txids.map((txid) =>
+        this.rpc.getMempoolEntry(txid).then(
+          () => txid,
+          (error: unknown) => {
+            // -5: not in the mempool. Anything else is not an answer.
+            if (error instanceof BitcoinRpcError && error.rpcCode === -5) return null;
+            throw error;
+          },
+        ),
+      ),
+    );
+    const spending = await this.rpc.getTxSpendingPrevout(outpoints);
+    if (!Array.isArray(spending) || spending.length !== outpoints.length) {
+      throw new ServiceUnavailableException('Bitcoin Core returned an invalid spending snapshot');
     }
-    const txids = [...snapshot.txids].sort();
-    if (new Set(txids).size !== txids.length) {
-      throw new ServiceUnavailableException('Bitcoin Core returned duplicate mempool txids');
-    }
-    return txids;
+    const unconfirmed = new Set(membership.filter((txid): txid is string => txid !== null));
+    const spenders = new Map<string, string>();
+    spending.forEach((row, index) => {
+      const outpoint = outpoints[index]!;
+      if (row.txid !== outpoint.txid || row.vout !== outpoint.vout) {
+        throw new ServiceUnavailableException('Bitcoin Core returned an invalid spending snapshot');
+      }
+      if (row.spendingtxid === undefined) return;
+      if (!/^[0-9a-f]{64}$/.test(row.spendingtxid)) {
+        throw new ServiceUnavailableException('Bitcoin Core returned an invalid spending txid');
+      }
+      spenders.set(`${outpoint.txid}:${outpoint.vout}`, row.spendingtxid);
+      unconfirmed.add(row.spendingtxid);
+    });
+    const relevant = new Set([...unconfirmed]);
+    const fingerprint = JSON.stringify([
+      [...unconfirmed].sort(),
+      [...spenders.entries()].sort(([left], [right]) => left.localeCompare(right)),
+    ]);
+    return { unconfirmed, spenders, relevant, fingerprint };
   }
 
   private parseProjection(value: unknown): Record<string, unknown> {

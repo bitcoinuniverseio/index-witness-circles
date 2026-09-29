@@ -1,7 +1,11 @@
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
-import { BitcoinRpcClient, type RawMempoolEntry } from '../src/bitcoin/bitcoin-rpc.client';
+import {
+  BitcoinRpcClient,
+  BitcoinRpcError,
+  type RawMempoolEntry,
+} from '../src/bitcoin/bitcoin-rpc.client';
 import { AppConfiguration } from '../src/config/configuration';
 import { IndexerLeaseHandle, IndexerLeaseService } from '../src/indexer/indexer-lease.service';
 import { IndexerStore } from '../src/indexer/indexer.store';
@@ -140,5 +144,92 @@ describe('mempool reconciliation completeness', () => {
       findActiveCompetitor(txid: string, nodeTxids: Set<string>): Promise<string | null>;
     };
     await expect(internal.findActiveCompetitor(PARENT, new Set([CHILD]))).resolves.toBe(CHILD);
+  });
+});
+
+describe('mempool reconciliation after a new tip', () => {
+  const STALE = { evaluatedTipHeight: 9, evaluatedTipHash: '99'.repeat(32) };
+  const PLAIN = 'aa'.repeat(32);
+  const SPENDS_SHARD = 'bb'.repeat(32);
+
+  it('carries plain transactions forward and re-evaluates only protocol-adjacent ones', async () => {
+    const { service, dataSource } = createMempoolService([
+      { txid: PLAIN, status: 'active', protocolStatus: 'none', projectionJson: null, ...STALE },
+      {
+        txid: SPENDS_SHARD,
+        status: 'active',
+        protocolStatus: 'none',
+        projectionJson: null,
+        ...STALE,
+      },
+    ]);
+    // The protocol-adjacency query names only the shard spender.
+    (dataSource.manager.query as jest.Mock).mockResolvedValueOnce([{ txid: SPENDS_SHARD }]);
+    const ingest = jest.spyOn(service, 'ingest').mockResolvedValue({
+      txid: SPENDS_SHARD,
+      protocolStatus: 'none',
+      protocolCode: null,
+      conflicts: [],
+    });
+    const rpc = {
+      getRawTransaction: jest.fn(async (txid: string) => ({ txid })),
+      hydratePrevouts: jest.fn(async (transaction: { txid: string }) => transaction),
+    } as unknown as BitcoinRpcClient;
+
+    await service.reconcile(rpc, { fencingToken: '1' } as IndexerLeaseHandle, {
+      [PLAIN]: ENTRY,
+      [SPENDS_SHARD]: ENTRY,
+    });
+
+    expect(ingest).toHaveBeenCalledTimes(1);
+    expect(rpc.getRawTransaction).toHaveBeenCalledWith(SPENDS_SHARD);
+    expect(rpc.getRawTransaction).not.toHaveBeenCalledWith(PLAIN);
+  });
+});
+
+describe('mempool reconciliation while transactions leave the mempool', () => {
+  const GONE = 'cc'.repeat(32);
+
+  function rpcWhere(mempoolEntry: jest.Mock): BitcoinRpcClient {
+    return {
+      getRawTransaction: jest.fn(async () => {
+        throw new BitcoinRpcError(
+          'getrawtransaction',
+          -5,
+          'No such mempool or blockchain transaction',
+        );
+      }),
+      hydratePrevouts: jest.fn(),
+      getMempoolEntry: mempoolEntry,
+    } as unknown as BitcoinRpcClient;
+  }
+
+  it('treats a transaction that provably left the mempool as gone, not as a gap', async () => {
+    const { service } = createMempoolService([]);
+    const rpc = rpcWhere(
+      jest.fn().mockRejectedValue(new BitcoinRpcError('getmempoolentry', -5, 'not in mempool')),
+    );
+
+    await expect(
+      service.reconcile(rpc, { fencingToken: '1' } as IndexerLeaseHandle, { [GONE]: ENTRY }),
+    ).resolves.toMatchObject({ added: 0 });
+  });
+
+  it('still fails the pass when a transaction is in the mempool but unreadable', async () => {
+    const { service } = createMempoolService([]);
+    const rpc = rpcWhere(jest.fn().mockResolvedValue(ENTRY));
+
+    await expect(
+      service.reconcile(rpc, { fencingToken: '1' } as IndexerLeaseHandle, { [GONE]: ENTRY }),
+    ).rejects.toThrow('could not evaluate 1 transaction');
+  });
+
+  it('still fails the pass when the mempool lookup itself errors', async () => {
+    const { service } = createMempoolService([]);
+    const rpc = rpcWhere(jest.fn().mockRejectedValue(new Error('connection reset')));
+
+    await expect(
+      service.reconcile(rpc, { fencingToken: '1' } as IndexerLeaseHandle, { [GONE]: ENTRY }),
+    ).rejects.toThrow('could not evaluate 1 transaction');
   });
 });
