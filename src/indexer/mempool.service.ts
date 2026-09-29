@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, In } from 'typeorm';
-import { BitcoinRpcClient, RawMempoolEntry } from '../bitcoin/bitcoin-rpc.client';
+import { BitcoinRpcClient, BitcoinRpcError, RawMempoolEntry } from '../bitcoin/bitcoin-rpc.client';
 import { AppConfiguration } from '../config/configuration';
 import {
   CheckpointEntity,
@@ -215,6 +215,10 @@ export class MempoolService {
         if (!existing) added += 1;
       } catch (error) {
         if (error instanceof IndexerLeaseLostError) throw error;
+        // On mainnet, transactions leave the mempool (mined, replaced,
+        // evicted) during every pass. One that is provably gone is not a gap
+        // in this snapshot: the next poll records its removal.
+        if (await this.leftMempool(rpc, txid)) continue;
         failures.push(txid);
         this.logger.warn({
           event: 'mempool_ingest_failed',
@@ -303,6 +307,16 @@ export class MempoolService {
       });
     }
     return new Set(carried);
+  }
+
+  private async leftMempool(rpc: BitcoinRpcClient, txid: string): Promise<boolean> {
+    try {
+      await rpc.getMempoolEntry(txid);
+      return false;
+    } catch (error) {
+      // -5: "Transaction not in mempool". Any other failure stays a failure.
+      return error instanceof BitcoinRpcError && error.rpcCode === -5;
+    }
   }
 
   async markSequenceRemoval(txid: string, handle: IndexerLeaseHandle): Promise<void> {

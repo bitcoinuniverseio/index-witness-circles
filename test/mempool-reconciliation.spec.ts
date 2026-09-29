@@ -1,7 +1,11 @@
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
-import { BitcoinRpcClient, type RawMempoolEntry } from '../src/bitcoin/bitcoin-rpc.client';
+import {
+  BitcoinRpcClient,
+  BitcoinRpcError,
+  type RawMempoolEntry,
+} from '../src/bitcoin/bitcoin-rpc.client';
 import { AppConfiguration } from '../src/config/configuration';
 import { IndexerLeaseHandle, IndexerLeaseService } from '../src/indexer/indexer-lease.service';
 import { IndexerStore } from '../src/indexer/indexer.store';
@@ -180,5 +184,52 @@ describe('mempool reconciliation after a new tip', () => {
     expect(ingest).toHaveBeenCalledTimes(1);
     expect(rpc.getRawTransaction).toHaveBeenCalledWith(SPENDS_SHARD);
     expect(rpc.getRawTransaction).not.toHaveBeenCalledWith(PLAIN);
+  });
+});
+
+describe('mempool reconciliation while transactions leave the mempool', () => {
+  const GONE = 'cc'.repeat(32);
+
+  function rpcWhere(mempoolEntry: jest.Mock): BitcoinRpcClient {
+    return {
+      getRawTransaction: jest.fn(async () => {
+        throw new BitcoinRpcError(
+          'getrawtransaction',
+          -5,
+          'No such mempool or blockchain transaction',
+        );
+      }),
+      hydratePrevouts: jest.fn(),
+      getMempoolEntry: mempoolEntry,
+    } as unknown as BitcoinRpcClient;
+  }
+
+  it('treats a transaction that provably left the mempool as gone, not as a gap', async () => {
+    const { service } = createMempoolService([]);
+    const rpc = rpcWhere(
+      jest.fn().mockRejectedValue(new BitcoinRpcError('getmempoolentry', -5, 'not in mempool')),
+    );
+
+    await expect(
+      service.reconcile(rpc, { fencingToken: '1' } as IndexerLeaseHandle, { [GONE]: ENTRY }),
+    ).resolves.toMatchObject({ added: 0 });
+  });
+
+  it('still fails the pass when a transaction is in the mempool but unreadable', async () => {
+    const { service } = createMempoolService([]);
+    const rpc = rpcWhere(jest.fn().mockResolvedValue(ENTRY));
+
+    await expect(
+      service.reconcile(rpc, { fencingToken: '1' } as IndexerLeaseHandle, { [GONE]: ENTRY }),
+    ).rejects.toThrow('could not evaluate 1 transaction');
+  });
+
+  it('still fails the pass when the mempool lookup itself errors', async () => {
+    const { service } = createMempoolService([]);
+    const rpc = rpcWhere(jest.fn().mockRejectedValue(new Error('connection reset')));
+
+    await expect(
+      service.reconcile(rpc, { fencingToken: '1' } as IndexerLeaseHandle, { [GONE]: ENTRY }),
+    ).rejects.toThrow('could not evaluate 1 transaction');
   });
 });
