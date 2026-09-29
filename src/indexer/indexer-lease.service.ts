@@ -51,6 +51,7 @@ export class IndexerLeaseService implements OnModuleDestroy {
   private timer: NodeJS.Timeout | null = null;
   private serial = Promise.resolve();
   private started = false;
+  private fencedInFlight = 0;
 
   constructor(
     private readonly dataSource: DataSource,
@@ -109,8 +110,10 @@ export class IndexerLeaseService implements OnModuleDestroy {
     work: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
     if (!this.isCurrent(handle)) throw new IndexerLeaseLostError();
+    const renewal = { atMs: 0 };
+    this.fencedInFlight += 1;
     try {
-      return await this.dataSource.transaction(isolation, async (manager) => {
+      const result = await this.dataSource.transaction(isolation, async (manager) => {
         const rows = (await manager.query(
           `SELECT owner_id AS ownerId, CAST(fencing_token AS CHAR) AS fencingToken,
                   expires_at > UTC_TIMESTAMP(3) AS active
@@ -126,11 +129,29 @@ export class IndexerLeaseService implements OnModuleDestroy {
         ) {
           throw new IndexerLeaseLostError();
         }
+        // This transaction holds the lease row until it commits, so the
+        // heartbeat's own UPDATE would wait behind it. A block ingest runs for
+        // longer than innodb_lock_wait_timeout on mainnet, and every such
+        // wait dropped leadership. Renew here instead, under the lock we hold.
+        const startedAtMs = Date.now();
+        await manager.query(
+          `UPDATE wc_indexer_leases
+           SET expires_at = TIMESTAMPADD(MICROSECOND, ?, UTC_TIMESTAMP(3))
+           WHERE lease_name = ? AND owner_id = ? AND fencing_token = ?`,
+          [this.ttlMs * 1_000, handle.leaseName, handle.ownerId, handle.fencingToken],
+        );
+        renewal.atMs = startedAtMs;
         return work(manager);
       });
+      if (renewal.atMs > 0 && this.current && this.isSameLease(handle)) {
+        this.current.expiresAtMs = Math.max(this.current.expiresAtMs, renewal.atMs + this.ttlMs);
+      }
+      return result;
     } catch (error) {
       if (error instanceof IndexerLeaseLostError) this.dropCurrent('fenced');
       throw error;
+    } finally {
+      this.fencedInFlight -= 1;
     }
   }
 
@@ -194,6 +215,9 @@ export class IndexerLeaseService implements OnModuleDestroy {
         if (handle) this.setCurrent(handle);
         return;
       }
+      // An in-flight fenced transaction holds the lease row and renewed the
+      // lease when it began; renewing here would only queue behind it.
+      if (this.fencedInFlight > 0) return;
       try {
         const result = (await this.dataSource.query(
           `UPDATE wc_indexer_leases
@@ -212,6 +236,12 @@ export class IndexerLeaseService implements OnModuleDestroy {
         this.dropCurrent('renewal_error');
       }
     });
+  }
+
+  private isSameLease(handle: IndexerLeaseHandle): boolean {
+    return (
+      this.current?.ownerId === handle.ownerId && this.current.fencingToken === handle.fencingToken
+    );
   }
 
   private handle(row: LeaseRow | undefined): IndexerLeaseHandle | null {
