@@ -2,7 +2,7 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { WitnessQueryService } from '../src/api/witness-query.service';
-import { BitcoinRpcClient } from '../src/bitcoin/bitcoin-rpc.client';
+import { BitcoinRpcClient, BitcoinRpcError } from '../src/bitcoin/bitcoin-rpc.client';
 import { AppConfiguration } from '../src/config/configuration';
 import { IndexerStore } from '../src/indexer/indexer.store';
 import { SyncStatusService } from '../src/indexer/sync-status.service';
@@ -18,11 +18,18 @@ function createService(input: {
   activeShards?: Array<Record<string, unknown>>;
   pendingOutputs?: Array<Record<string, unknown>>;
   pendingSpends?: Array<Record<string, unknown>>;
+  nodeSpenders?: Record<string, string>;
+  projectedTxids?: string[];
+  runtime?: Record<string, unknown>;
 }): WitnessQueryService {
   const coreTxids = input.coreTxids ?? [];
+  const projectedTxids = input.projectedTxids ?? [
+    ...coreTxids,
+    ...Object.values(input.nodeSpenders ?? {}),
+  ];
   const query = jest.fn((sql: string) => {
     if (sql.includes('evaluated_tip_hash')) {
-      return Promise.resolve(coreTxids.map((txid) => ({ txid, evaluatedTipHash: TIP_HASH })));
+      return Promise.resolve(projectedTxids.map((txid) => ({ txid, evaluatedTipHash: TIP_HASH })));
     }
     if (sql.includes('FROM wc_shards')) return Promise.resolve(input.activeShards ?? []);
     if (
@@ -66,10 +73,16 @@ function createService(input: {
         bestblockhash: input.secondNodeHash ?? TIP_HASH,
         initialblockdownload: false,
       }),
-    getRawMempoolSequence: jest.fn().mockResolvedValue({
-      txids: coreTxids,
-      mempool_sequence: 7,
+    getMempoolEntry: jest.fn(async (txid: string) => {
+      if (coreTxids.includes(txid)) return {};
+      throw new BitcoinRpcError('getmempoolentry', -5, 'Transaction not in mempool');
     }),
+    getTxSpendingPrevout: jest.fn(async (outpoints: Array<{ txid: string; vout: number }>) =>
+      outpoints.map(({ txid, vout }) => {
+        const spendingtxid = input.nodeSpenders?.[`${txid}:${vout}`];
+        return spendingtxid ? { txid, vout, spendingtxid } : { txid, vout };
+      }),
+    ),
   } as unknown as BitcoinRpcClient;
   const store = { startHeight: 0, network: 3 } as unknown as IndexerStore;
   const syncStatus = {
@@ -88,6 +101,7 @@ function createService(input: {
       lastMempoolError: null,
       lastVerificationAt: new Date().toISOString(),
       lastError: null,
+      ...input.runtime,
     }),
   } as unknown as SyncStatusService;
   const config = {
@@ -169,6 +183,7 @@ describe('exact outpoint safety snapshots', () => {
     await expect(
       createService({
         coreTxids: ['88'.repeat(32)],
+        nodeSpenders: { [`${TARGET_TXID}:2`]: '88'.repeat(32) },
         activeShards: [
           { txid: TARGET_TXID, vout: 2, lineageId: '44'.repeat(32), circleTxid: '55'.repeat(32) },
         ],
@@ -193,6 +208,7 @@ describe('exact outpoint safety snapshots', () => {
     await expect(
       createService({
         coreTxids: [TARGET_TXID, spendingTxid],
+        nodeSpenders: { [`${TARGET_TXID}:1`]: spendingTxid },
         pendingOutputs: [
           {
             txid: TARGET_TXID,
@@ -225,6 +241,48 @@ describe('exact outpoint safety snapshots', () => {
         },
       ],
     });
+  });
+
+  it('answers while a mempool pass runs and the mempool has moved on', async () => {
+    await expect(
+      createService({
+        coreTxids: ['aa'.repeat(32)],
+        runtime: { mempoolSyncing: true, mempoolSequence: 3 },
+      }).safetyOutpoints([{ txid: TARGET_TXID, vout: 0 }]),
+    ).resolves.toMatchObject({
+      items: [{ classification: 'unclassified', protected: false }],
+    });
+  });
+
+  it('protects an outpoint Core sees spent in its mempool', async () => {
+    const spendingTxid = 'bb'.repeat(32);
+    await expect(
+      createService({
+        nodeSpenders: { [`${TARGET_TXID}:0`]: spendingTxid },
+      }).safetyOutpoints([{ txid: TARGET_TXID, vout: 0 }]),
+    ).resolves.toMatchObject({
+      items: [{ classification: 'pending-spend', protected: true, spendingTxids: [spendingTxid] }],
+    });
+  });
+
+  it('fails closed when a relevant mempool transaction is not projected yet', async () => {
+    await expect(
+      createService({
+        nodeSpenders: { [`${TARGET_TXID}:0`]: 'cc'.repeat(32) },
+        projectedTxids: [],
+      }).safetyOutpoints([{ txid: TARGET_TXID, vout: 0 }]),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(
+      createService({ coreTxids: [TARGET_TXID], projectedTxids: [] }).safetyOutpoints([
+        { txid: TARGET_TXID, vout: 0 },
+      ]),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('marks an outpoint whose creating transaction is unconfirmed as protected', async () => {
+    await expect(
+      createService({ coreTxids: [TARGET_TXID] }).safetyOutpoints([{ txid: TARGET_TXID, vout: 0 }]),
+    ).resolves.toMatchObject({ items: [{ classification: 'unconfirmed', protected: true }] });
   });
 
   it('fails closed across a same-height tip replacement', async () => {
