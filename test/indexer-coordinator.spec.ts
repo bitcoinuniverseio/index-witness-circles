@@ -65,3 +65,85 @@ describe('IndexerCoordinator readiness and sequence handling', () => {
     expect(status.patch).toHaveBeenCalledWith({ lastMempoolError: 'database unavailable' });
   });
 });
+
+describe('IndexerCoordinator mempool reconciliation on a busy mempool', () => {
+  const TIP = '55'.repeat(32);
+  const OLD = '66'.repeat(32);
+  const NEW = '77'.repeat(32);
+
+  function coordinatorFor(rpc: Partial<BitcoinRpcClient>, mempool: Partial<MempoolService>) {
+    const handle = { fencingToken: '1' } as IndexerLeaseHandle;
+    const status = { patch: jest.fn() } as unknown as SyncStatusService;
+    const config = {
+      get: jest.fn((key: keyof AppConfiguration) =>
+        key === 'network' ? 'regtest' : { enabled: true },
+      ),
+    } as unknown as ConfigService<AppConfiguration, true>;
+    const store = {
+      getCheckpoint: jest.fn().mockResolvedValue({ tipHeight: 10, tipHash: TIP }),
+    } as unknown as IndexerStore;
+    const lease = {
+      currentLeadership: jest.fn().mockReturnValue(handle),
+    } as unknown as IndexerLeaseService;
+    const coordinator = new IndexerCoordinator(
+      config,
+      rpc as BitcoinRpcClient,
+      {} as BitcoinZmqService,
+      store,
+      mempool as MempoolService,
+      {} as ReorgService,
+      status,
+      {} as EventEmitter2,
+      lease,
+    );
+    return { coordinator, status };
+  }
+
+  it('completes against one sequence snapshot although the mempool keeps changing', async () => {
+    const reconcile = jest.fn().mockResolvedValue({ added: 1, removed: 0, replaced: 0 });
+    const getRawMempoolSequence = jest
+      .fn()
+      .mockResolvedValueOnce({ txids: [OLD], mempool_sequence: 40 })
+      .mockResolvedValue({ txids: [OLD, NEW], mempool_sequence: 41 });
+    const { coordinator, status } = coordinatorFor(
+      {
+        getBlockchainInfo: jest.fn().mockResolvedValue({ blocks: 10, bestblockhash: TIP }),
+        getRawMempoolSequence,
+        // NEW arrived between the two calls; it belongs to the next poll.
+        getRawMempool: jest.fn().mockResolvedValue({ [OLD]: {}, [NEW]: {} }),
+      } as unknown as Partial<BitcoinRpcClient>,
+      { reconcile } as unknown as Partial<MempoolService>,
+    );
+
+    await coordinator.syncMempool();
+
+    expect(Object.keys(reconcile.mock.calls[0][2] as object)).toEqual([OLD]);
+    expect(status.patch).toHaveBeenCalledWith(
+      expect.objectContaining({ mempoolSequence: 40, lastMempoolError: null }),
+    );
+  });
+
+  it('still refuses a reconciliation that straddles a new block', async () => {
+    const reconcile = jest.fn().mockResolvedValue({ added: 0, removed: 0, replaced: 0 });
+    const { coordinator, status } = coordinatorFor(
+      {
+        getBlockchainInfo: jest
+          .fn()
+          .mockResolvedValueOnce({ blocks: 10, bestblockhash: TIP })
+          .mockResolvedValue({ blocks: 11, bestblockhash: '88'.repeat(32) }),
+        getRawMempoolSequence: jest.fn().mockResolvedValue({ txids: [], mempool_sequence: 1 }),
+        getRawMempool: jest.fn().mockResolvedValue({}),
+      } as unknown as Partial<BitcoinRpcClient>,
+      { reconcile } as unknown as Partial<MempoolService>,
+    );
+
+    await coordinator.syncMempool();
+
+    expect(status.patch).toHaveBeenCalledWith({
+      lastMempoolError: 'Bitcoin Core chain changed during reconciliation',
+    });
+    expect(status.patch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ lastMempoolAt: expect.any(String) }),
+    );
+  });
+});

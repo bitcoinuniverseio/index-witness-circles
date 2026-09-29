@@ -142,3 +142,43 @@ describe('mempool reconciliation completeness', () => {
     await expect(internal.findActiveCompetitor(PARENT, new Set([CHILD]))).resolves.toBe(CHILD);
   });
 });
+
+describe('mempool reconciliation after a new tip', () => {
+  const STALE = { evaluatedTipHeight: 9, evaluatedTipHash: '99'.repeat(32) };
+  const PLAIN = 'aa'.repeat(32);
+  const SPENDS_SHARD = 'bb'.repeat(32);
+
+  it('carries plain transactions forward and re-evaluates only protocol-adjacent ones', async () => {
+    const { service, dataSource } = createMempoolService([
+      { txid: PLAIN, status: 'active', protocolStatus: 'none', projectionJson: null, ...STALE },
+      {
+        txid: SPENDS_SHARD,
+        status: 'active',
+        protocolStatus: 'none',
+        projectionJson: null,
+        ...STALE,
+      },
+    ]);
+    // The protocol-adjacency query names only the shard spender.
+    (dataSource.manager.query as jest.Mock).mockResolvedValueOnce([{ txid: SPENDS_SHARD }]);
+    const ingest = jest.spyOn(service, 'ingest').mockResolvedValue({
+      txid: SPENDS_SHARD,
+      protocolStatus: 'none',
+      protocolCode: null,
+      conflicts: [],
+    });
+    const rpc = {
+      getRawTransaction: jest.fn(async (txid: string) => ({ txid })),
+      hydratePrevouts: jest.fn(async (transaction: { txid: string }) => transaction),
+    } as unknown as BitcoinRpcClient;
+
+    await service.reconcile(rpc, { fencingToken: '1' } as IndexerLeaseHandle, {
+      [PLAIN]: ENTRY,
+      [SPENDS_SHARD]: ENTRY,
+    });
+
+    expect(ingest).toHaveBeenCalledTimes(1);
+    expect(rpc.getRawTransaction).toHaveBeenCalledWith(SPENDS_SHARD);
+    expect(rpc.getRawTransaction).not.toHaveBeenCalledWith(PLAIN);
+  });
+});
