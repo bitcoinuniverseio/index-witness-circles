@@ -71,7 +71,7 @@ Never expose Bitcoin RPC to the public internet. Use unique strong RPC and datab
 
 ## Network and indexing boundary
 
-`WITNESS_NETWORK` must be `signet` or `regtest`. The parser can classify all four assigned protocol network bytes for deterministic observation, but this release fails startup for mainnet and testnet3 deployments.
+`WITNESS_NETWORK` must be `mainnet`, `signet`, or `regtest`. The parser can classify all four assigned protocol network bytes for deterministic observation, but this release fails startup for testnet3 deployments.
 
 `INDEXER_START_HEIGHT` is a trust boundary. A deployment starting above zero can verify and continue WITC lineages created after that height, but it cannot discover earlier protocol history without replaying from an earlier boundary. Public authoritative deployments should use the protocol activation height once that height is assigned.
 
