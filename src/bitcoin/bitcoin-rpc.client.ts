@@ -262,6 +262,13 @@ export class BitcoinRpcClient {
     return this.call<RawMempoolEntry>('getmempoolentry', [txid]);
   }
 
+  /** The mempool transaction spending each outpoint, if any (Core 24+). */
+  getTxSpendingPrevout(
+    outpoints: ReadonlyArray<{ txid: string; vout: number }>,
+  ): Promise<Array<{ txid: string; vout: number; spendingtxid?: string }>> {
+    return this.call('gettxspendingprevout', [outpoints.map(({ txid, vout }) => ({ txid, vout }))]);
+  }
+
   estimateSmartFee(
     targetBlocks: number,
     mode: 'CONSERVATIVE' | 'ECONOMICAL' = 'CONSERVATIVE',

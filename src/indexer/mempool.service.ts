@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, In } from 'typeorm';
-import { BitcoinRpcClient, RawMempoolEntry } from '../bitcoin/bitcoin-rpc.client';
+import { BitcoinRpcClient, BitcoinRpcError, RawMempoolEntry } from '../bitcoin/bitcoin-rpc.client';
 import { AppConfiguration } from '../config/configuration';
 import {
   CheckpointEntity,
@@ -21,6 +21,8 @@ import {
   IndexerLeaseService,
 } from './indexer-lease.service';
 import { DatabaseStateLookup, IndexerStore } from './indexer.store';
+
+const CARRY_FORWARD_CHUNK = 1_000;
 
 export interface MempoolIngestResult {
   txid: string;
@@ -195,13 +197,15 @@ export class MempoolService {
     let removed = 0;
     let replaced = 0;
     const failures: string[] = [];
+    const carried = await this.carryForwardUnaffected(mempool, localByTxid, checkpoint, handle);
 
     for (const txid of this.dependencyOrder(mempool)) {
       const existing = localByTxid.get(txid);
       if (
         existing?.status === 'active' &&
-        existing.evaluatedTipHeight === checkpoint.tipHeight &&
-        existing.evaluatedTipHash === checkpoint.tipHash
+        ((existing.evaluatedTipHeight === checkpoint.tipHeight &&
+          existing.evaluatedTipHash === checkpoint.tipHash) ||
+          carried.has(txid))
       ) {
         continue;
       }
@@ -211,6 +215,10 @@ export class MempoolService {
         if (!existing) added += 1;
       } catch (error) {
         if (error instanceof IndexerLeaseLostError) throw error;
+        // On mainnet, transactions leave the mempool (mined, replaced,
+        // evicted) during every pass. One that is provably gone is not a gap
+        // in this snapshot: the next poll records its removal.
+        if (await this.leftMempool(rpc, txid)) continue;
         failures.push(txid);
         this.logger.warn({
           event: 'mempool_ingest_failed',
@@ -237,6 +245,78 @@ export class MempoolService {
     }
     await this.purgeExpired(handle);
     return { added, removed, replaced };
+  }
+
+  /**
+   * A new tip used to re-evaluate every active mempool transaction: one RPC
+   * fetch, prevout hydration and fenced write each, about 21,000 per mainnet
+   * block, so reconciliation never finished before the next block and safety
+   * checks never became ready. A transaction classified `none` with no
+   * closures, none of whose inputs is a shard or an output of a mempool
+   * transaction that touches the protocol, classifies the same at any height.
+   * Those only get their evaluated tip moved forward; everything else is
+   * re-evaluated as before.
+   */
+  private async carryForwardUnaffected(
+    mempool: Record<string, RawMempoolEntry>,
+    localByTxid: Map<string, MempoolTransactionEntity>,
+    checkpoint: { tipHeight: number; tipHash: string | null },
+    handle: IndexerLeaseHandle,
+  ): Promise<Set<string>> {
+    const candidates = Object.keys(mempool).filter((txid) => {
+      const existing = localByTxid.get(txid);
+      return (
+        existing?.status === 'active' &&
+        existing.protocolStatus === 'none' &&
+        existing.projectionJson == null &&
+        (existing.evaluatedTipHeight !== checkpoint.tipHeight ||
+          existing.evaluatedTipHash !== checkpoint.tipHash)
+      );
+    });
+    if (candidates.length === 0) return new Set();
+
+    const affected = new Set(
+      (
+        (await withMasterRead(this.dataSource, (manager) =>
+          manager.query(
+            `SELECT DISTINCT input.txid AS txid
+             FROM wc_mempool_inputs input
+             LEFT JOIN wc_shards shard
+               ON shard.txid = input.prev_txid AND shard.vout = input.prev_vout
+             LEFT JOIN wc_mempool_transactions parent
+               ON parent.txid = input.prev_txid
+              AND parent.status IN ('active', 'removed')
+              AND (parent.protocol_status IS NULL OR parent.protocol_status <> 'none'
+                   OR parent.projection_json IS NOT NULL)
+             WHERE shard.txid IS NOT NULL OR parent.txid IS NOT NULL`,
+          ),
+        )) as { txid: string }[]
+      ).map((row) => row.txid),
+    );
+    const carried = candidates.filter((txid) => !affected.has(txid));
+    for (let start = 0; start < carried.length; start += CARRY_FORWARD_CHUNK) {
+      const chunk = carried.slice(start, start + CARRY_FORWARD_CHUNK);
+      await this.lease.fencedTransaction(handle, 'READ COMMITTED', async (manager) => {
+        await manager.query(
+          `UPDATE wc_mempool_transactions
+           SET evaluated_tip_height = ?, evaluated_tip_hash = ?
+           WHERE status = 'active' AND protocol_status = 'none' AND projection_json IS NULL
+             AND txid IN (${chunk.map(() => '?').join(',')})`,
+          [checkpoint.tipHeight, checkpoint.tipHash, ...chunk],
+        );
+      });
+    }
+    return new Set(carried);
+  }
+
+  private async leftMempool(rpc: BitcoinRpcClient, txid: string): Promise<boolean> {
+    try {
+      await rpc.getMempoolEntry(txid);
+      return false;
+    } catch (error) {
+      // -5: "Transaction not in mempool". Any other failure stays a failure.
+      return error instanceof BitcoinRpcError && error.rpcCode === -5;
+    }
   }
 
   async markSequenceRemoval(txid: string, handle: IndexerLeaseHandle): Promise<void> {
