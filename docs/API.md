@@ -32,6 +32,12 @@ Collection routes accept `limit`, normally 1 through 200, and an opaque `cursor`
 
 `POST /v1/witness/safety/outpoints` accepts 1 through 200 unique lowercase `{ "txid", "vout" }` objects. The response is never cacheable. The server brackets one stable Bitcoin Core tip and mempool sequence, requires exact Core-to-database active-mempool parity and a fresh successful reconciliation, then classifies every requested outpoint as `active-shard`, `pending-successor`, `pending-spend`, `unconfirmed`, or `unclassified`. Signing clients must require `complete: true`, exact item ordering, and an unchanged snapshot hash. Any error, truncation, unknown field, or unexpected classification is a fail-closed result.
 
+## Explorer block events
+
+`GET /v1/checkpoint` returns `{ chain, network, height, hash }` from the database checkpoint; `503` before a checkpoint exists.
+
+`GET /v1/explorer/blocks/:height/events?limit=1..500&cursor=` implements the shared `universe-block-events-v1` contract with protocol id `witness_circles`. It emits one event per member slot of each confirmed canonical Circle in that block, ordered by transaction position then slot: `register` when the slot starts a fresh lineage, otherwise `update`. `assetId` is the lineage id; `inputOutpoint`, `outputOutpoint`, and `toAddress` come from the stored member row. Lineage closures are not emitted. Heights above the checkpoint return `indexed: false`. Malformed height, limit, or cursor is `400`; an unready indexer is `503`.
+
 ## WebSocket
 
 Connect to Socket.IO namespace `/v1/witness/ws` using WebSocket transport. Broadcast events:
