@@ -88,7 +88,7 @@ jobs:
       - run: npm run build
       # Kept on the fleet's own NVMe rather than metered artifact storage, so
       # deployment and any later scan consume these exact bytes for free.
-      - uses: bitcoinuniverseio/universe-ci-actions/universe-build-store@49c5ceb7e97bd33b567513b3135e0eb5525d89e5 # v1 # v1
+      - uses: bitcoinuniverseio/universe-ci-actions/universe-build-store@e8536068a9107ac0f680bf5f2b5cb07b4fdb1ecb # v1 # v1
         with:
           path: dist
           mode: save
